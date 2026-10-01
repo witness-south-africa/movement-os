@@ -75,6 +75,8 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Verify dependency toolchain
+        run: node scripts/verify-dependency-toolchain.mjs
       - name: Test
         run: pnpm nx run-many -t test -- --runInBand
 
