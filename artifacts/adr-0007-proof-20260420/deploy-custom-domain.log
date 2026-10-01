@@ -1,0 +1,27 @@
+wrangler 4.83.0 (update available 4.84.0)
+Total Upload: 235.21 KiB / gzip: 44.85 KiB
+Worker Startup Time: 28 ms
+Your Worker has access to the following bindings:
+Binding                                                       Resource
+env.OPERATOR_RATE_LIMITER (OperatorRateLimiterDurableObject)  Durable Object
+env.WSA_TELEMETRY (wsa-telemetry)                             R2 Bucket
+env.XAI_API_BASE_URL ("https://api.x.ai/v1")                  Environment Variable
+env.XAI_MODEL ("grok-4-fast-reasoning")                       Environment Variable
+env.AUTH_REPLAY_WINDOW_SECONDS ("300")                        Environment Variable
+env.RATE_LIMIT_REQUESTS_PER_MINUTE ("6")                      Environment Variable
+env.RATE_LIMIT_MAX_INFLIGHT ("2")                             Environment Variable
+
+Uploaded [redacted-worker] (9.60 sec)
+WARNING: Because 'workers_dev' is not in your Wrangler file, it will be disabled for this deployment by default.
+
+  To override this setting, you can enable workers.dev by explicitly setting 'workers_dev = true' in your Wrangler file.
+
+
+WARNING: Because your 'workers.dev' route is disabled and your 'preview_urls' setting is not in your Wrangler file, Preview URLs will be disabled for this deployment by default.
+
+  To override this setting, you can enable Preview URLs by explicitly setting 'preview_urls = true' in your Wrangler file.
+
+
+Deployed [redacted-worker] triggers (2.65 sec)
+  [redacted-custom-domain] (custom domain)
+Current Version ID: 74738ba8...

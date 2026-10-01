@@ -4,6 +4,7 @@ import {
   type ExtractHandlerDeps,
 } from './extract-handler.js';
 import { OperatorRateLimiterDurableObject } from './rate-limiter.js';
+import { createAuthTelemetrySampler } from './auth-telemetry.js';
 
 export { OperatorRateLimiterDurableObject };
 export type { Env };
@@ -11,8 +12,12 @@ export type { Env };
 export function createWorker(
   deps: ExtractHandlerDeps = {},
 ): ExportedHandler<Env> {
+  const handlerDeps = {
+    ...deps,
+    admitAuthTelemetry: deps.admitAuthTelemetry ?? createAuthTelemetrySampler(),
+  };
   return {
-    async fetch(request, env): Promise<Response> {
+    async fetch(request, env, context): Promise<Response> {
       const url = new URL(request.url);
 
       if (url.pathname !== '/v1/extract') {
@@ -28,7 +33,7 @@ export function createWorker(
         );
       }
 
-      return handleExtractRequest(request, env, deps);
+      return handleExtractRequest(request, env, handlerDeps, context);
     },
   };
 }

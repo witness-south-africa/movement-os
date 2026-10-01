@@ -20,8 +20,13 @@ export function readBudgetCapUsdTicks(env: {
   readonly XAI_BUDGET_MONTHLY_CAP_USD_TICKS?: string;
 }): number {
   const raw = env.XAI_BUDGET_MONTHLY_CAP_USD_TICKS;
-  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
-  if (!Number.isInteger(parsed) || parsed < 0) {
+  const parsed = raw === undefined ? Number.NaN : Number(raw);
+  if (
+    raw === undefined ||
+    !/^\d+$/.test(raw) ||
+    !Number.isSafeInteger(parsed) ||
+    parsed < 0
+  ) {
     throw new Error('missing or invalid XAI_BUDGET_MONTHLY_CAP_USD_TICKS');
   }
   return parsed;

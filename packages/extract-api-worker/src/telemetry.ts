@@ -4,9 +4,9 @@ import type { ClaimSourceRef } from '@wsa/schemas';
 export interface ExtractTelemetryRecord {
   readonly requestId: string;
   readonly keyId: string;
-  readonly sourceRef: ClaimSourceRef;
-  readonly sourceSha256: string;
-  readonly sourceByteLength: number;
+  readonly sourceRef?: ClaimSourceRef;
+  readonly sourceSha256?: string;
+  readonly sourceByteLength?: number;
   readonly provider: 'xai';
   readonly model: string;
   readonly inputTokens: number;
@@ -16,13 +16,33 @@ export interface ExtractTelemetryRecord {
   readonly costInUsdTicks?: number;
   readonly outcome: 'success' | 'error' | 'budget_exhausted';
   readonly status?: ExtractionResult['status'];
+  readonly errorReason?: string;
+  readonly httpStatus?: number;
+  readonly stage?: 'auth' | 'handler';
+  readonly workerVersionId?: string;
+  readonly workerSourceSha?: string;
+}
+
+export function withWorkerVersion(
+  record: ExtractTelemetryRecord,
+  metadata?: WorkerVersionMetadata,
+): ExtractTelemetryRecord {
+  if (metadata === undefined) return record;
+  return {
+    ...record,
+    workerVersionId: metadata.id,
+    ...(/^[a-f0-9]{40}$/.test(metadata.tag)
+      ? { workerSourceSha: metadata.tag }
+      : {}),
+  };
 }
 
 export function telemetryObjectKey(
   monthKey: string,
-  requestId: string,
+  eventId: string,
+  stage?: ExtractTelemetryRecord['stage'],
 ): string {
-  return `xai/${monthKey}/${requestId}.json`;
+  return `${stage === 'auth' ? 'auth' : 'xai'}/${monthKey}/${eventId}.json`;
 }
 
 export async function writeTelemetryRecord(
@@ -31,7 +51,7 @@ export async function writeTelemetryRecord(
   record: ExtractTelemetryRecord,
 ): Promise<void> {
   await bucket.put(
-    telemetryObjectKey(monthKey, record.requestId),
+    telemetryObjectKey(monthKey, crypto.randomUUID(), record.stage),
     JSON.stringify(record),
     {
       httpMetadata: {
@@ -108,5 +128,28 @@ export function buildErrorTelemetryRecord(args: {
     outputTokens: 0,
     totalTokens: 0,
     outcome: 'error',
+    stage: 'handler',
+  };
+}
+
+export function buildAuthFailureTelemetryRecord(args: {
+  readonly requestId: string;
+  readonly keyId: 'missing' | 'provided';
+  readonly model: string;
+  readonly reason: string;
+}): ExtractTelemetryRecord {
+  return {
+    requestId: args.requestId,
+    keyId: args.keyId,
+    provider: 'xai',
+    model: args.model,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    outcome: 'error',
+    errorReason: args.reason,
+    httpStatus: 401,
+    stage: 'auth',
   };
 }

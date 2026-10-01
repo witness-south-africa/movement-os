@@ -15,8 +15,9 @@ under `docs/architecture/` and `.github/workflows/`, field protocols under
 `docs/field/`, and the public landing page served via GitHub Pages. Cloudflare
 Email Routing, a Cloudflare Email Worker, R2-backed mail preservation, Resend
 for outbound probes, and Infisical for secrets are all in active use. The
-private extract API worker is in the repo and tested, but it is not yet
-deployed to `extract-api.witnesssouthafrica.org`. The heavier graph datastore
+private extract API worker has a dated April 20 deployment proof bundle;
+adoption of the current source revision still needs version-linked runtime
+verification ([ADR-0007](./docs/architecture/0007-extract-api-surface.md)). The heavier graph datastore
 and retrieval stack described in ADR-0004 is still planned rather than shipped.
 
 ## Mission
@@ -67,7 +68,8 @@ This sentence is the platform's public API. It is pinned in
     source material into typed claims/evidence and immediately applies the
     promotion gate.
   - `@wsa/extract-api-worker` — private signed Cloudflare Worker surface for
-    Lane-2 evidence extraction per ADR-0007. Code shipped; deployment pending.
+    Lane-2 evidence extraction per ADR-0007. Historical deployment recorded;
+    current revision adoption requires fresh runtime proof.
   - `@wsa/guardrails` — deterministic publication and promotion gates,
     including ADR-0005 rules and ADR-0003's challenge-lane enforcement.
   - `@wsa/principles` — pinned mission/principles package and doctrine hash
@@ -107,8 +109,9 @@ working surfaces at this SHA:
 
 - The Postgres + Apache AGE + pgvector evidence graph stack described in
   ADR-0004.
-- Live deployment of `@wsa/extract-api-worker` to
-  `extract-api.witnesssouthafrica.org`.
+- Deployment and version-linked acceptance of the hardened
+  `@wsa/extract-api-worker` revision using the
+  [extract API runbook](./docs/ops/extract-api-runbook.md).
 - Anthropic and local provider adapters beyond the currently shipped
   packages.
 - Any future control-plane API or CLI surfaces, if and when they are actually
@@ -119,36 +122,47 @@ working surfaces at this SHA:
 ADR-0008 is shipped. The repo has a root `CODEOWNERS` file and a
 `quorum-audit` workflow that checks for author/reviewer/controller signatures
 on the current PR head across PR updates, issue comments, and review
-submissions, then publishes a PR-head check run. That is procedural ceremony
-backed by automation, not access-control enforcement: as of this SHA, there is
-still only one write-capable GitHub identity, so the audit trail is real but
-the separation of powers is not yet technical.
+submissions, then publishes a PR-head check run. Signers need current
+repository write, maintain or admin access. Roles use separate review
+contexts, while only one GitHub identity currently has write access;
+credential separation remains an identity-hardening task.
 
-### Role contract vs. v1 labels
+The live `main-protection` ruleset requires `quorum-audit` alongside
+`lint`, `typecheck`, `test` and `build`. The runner job is named
+`quorum-publisher` so it does not compete with the published PR-head
+check. The [ruleset snapshot](./ruleset-main.json) records the live
+configuration; it does not apply settings to GitHub.
+The publisher runs trusted default-branch code without a PR checkout.
+A read-only review observer triggers it for review changes, including
+forks. Manual refresh, migration and post-merge proof are covered in the
+[operator runbook](./docs/ops/agent-protocol.md#merge-and-post-merge-verification).
 
-The governance model is defined by a four-role contract (see
-[ADR-0008](./docs/architecture/0008-operational-security-model.md#role-contract-and-v1-label-protocol)),
-not by the specific label strings used today:
+### Role contract and labels
 
-| Role (contract)           | Current v1 label on PR issue comments or review bodies |
-|---------------------------|--------------------------------------------------------|
-| author / worker           | `Agent WS1` or `Agent WS2`                             |
-| reviewer / critic         | `Agent R3`                                             |
-| controller / orchestrator | `Agent BOSS`                                           |
-| lifecycle / verifier      | `Agent L1` (intended, not yet enforced)                |
+The four-role contract is described in
+[ADR-0008](./docs/architecture/0008-operational-security-model.md#role-contract-and-label-protocol).
 
-The names `WS1`, `R3`, `BOSS`, `L1` are a v1 naming convention. They are
-project-specific, not a standard. Operationally, `quorum-audit.yml`
-currently parses those exact strings across both PR issue comments and
-PR review bodies (reviews in `DISMISSED` state are ignored). A rename
-is a coordinated workflow-plus-docs change, not a free-form edit.
+| Role                      | Current label                         |
+| ------------------------- | ------------------------------------- |
+| author / worker           | `Agent WS1` or `Agent WS2`            |
+| reviewer / critic         | `Agent R3`                            |
+| controller / orchestrator | `Agent Controller`                    |
+| lifecycle / verifier      | `Agent L1` (procedural, not enforced) |
+
+Use Controller for new work. The parser retains `Agent BOSS` as a legacy
+alias for existing attestations. Reviews contribute signatures only in
+`COMMENTED` or `APPROVED` state on the current head commit. Exact formats
+and withdrawal rules live in the
+[shared protocol](./docs/ops/agent-protocol.md#quorum-attestations).
 
 These governance roles are distinct from the **runtime agents** shipped
 under `packages/` (e.g. `@wsa/agent-openai`, `@wsa/agent-xai`). Runtime
 agents are product code that calls LLMs to process evidence; governance
 roles are PR-time attestations that process discipline happened.
 
-For the operator-facing workflow used to run repo tasks, see:
+For repo tasks, use the repo-local
+[Movement workflow skill](./.agents/skills/movement-workflow/SKILL.md) and
+load only the assigned role reference. Operator documents:
 
 - [docs/ops/agent-protocol.md](./docs/ops/agent-protocol.md)
 - [docs/ops/agent-cheat-sheet.md](./docs/ops/agent-cheat-sheet.md)
@@ -186,6 +200,7 @@ pnpm nx sync
 - [POPIA.md](./POPIA.md)
 - [docs/ops/dns-runbook.md](./docs/ops/dns-runbook.md)
 - [docs/ops/email-worker-runbook.md](./docs/ops/email-worker-runbook.md)
+- [docs/ops/extract-api-runbook.md](./docs/ops/extract-api-runbook.md)
 - [docs/ops/agent-protocol.md](./docs/ops/agent-protocol.md)
 - [docs/ops/agent-cheat-sheet.md](./docs/ops/agent-cheat-sheet.md)
 - [docs/ops/agent-prompts.md](./docs/ops/agent-prompts.md)

@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "probe": 1,
+      "status": 200,
+      "reason": null,
+      "requestIdPrefix": "rl-1-177"
+    },
+    {
+      "probe": 2,
+      "status": 429,
+      "reason": "rate_limited",
+      "requestIdPrefix": ""
+    },
+    {
+      "probe": 3,
+      "status": 200,
+      "reason": null,
+      "requestIdPrefix": "rl-3-177"
+    },
+    {
+      "probe": 4,
+      "status": 429,
+      "reason": "rate_limited",
+      "requestIdPrefix": ""
+    }
+  ],
+  "rateLimitedCount": 2,
+  "successCount": 2
+}

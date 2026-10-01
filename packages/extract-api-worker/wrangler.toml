@@ -2,10 +2,15 @@ name = "wsa-extract-api"
 main = "src/index.ts"
 compatibility_date = "2026-04-18"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
 
-routes = [
-  { pattern = "extract-api.witnesssouthafrica.org/v1/extract", zone_name = "witnesssouthafrica.org" }
-]
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[routes]]
+pattern = "extract-api.witnesssouthafrica.org"
+custom_domain = true
 
 [[durable_objects.bindings]]
 name = "OPERATOR_RATE_LIMITER"

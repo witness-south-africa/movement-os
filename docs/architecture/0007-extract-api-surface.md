@@ -1,6 +1,6 @@
 # 0007 — Extract API surface scoping
 
-- Status: draft
+- Status: accepted
 - Date: 2026-04-18
 - Relates to: [ADR-0001](./0001-agent-framework.md),
   [ADR-0003](./0003-llm-provider-matrix.md),
@@ -10,10 +10,11 @@
 ## Context
 
 `@wsa/evidence-engine` is now on `main` and provides the first real
-`guardrails -> @wsa/agent-xai` runtime path in code. What it does not
-yet have is a deployed operator-facing surface that actually invokes
-that path. Until such a surface exists and is exercised, xAI remains
-"runtime-ready in code" rather than "live in production".
+`guardrails -> @wsa/agent-xai` runtime path in code. The private
+operator-facing extract API has a historical Cloudflare deployment bundle
+dated April 20, 2026. It records end-to-end observations on that date;
+it does not bind the currently deployed Worker to the source revision
+reviewed here. Current adoption requires fresh version-linked proof.
 
 This ADR scopes the thinnest correct first deployed surface. It answers
 the five blocking unknowns before any implementation starts:
@@ -24,8 +25,9 @@ the five blocking unknowns before any implementation starts:
 4. how it rate-limits and protects the xAI budget
 5. how it handles potentially sensitive source text under POPIA
 
-The scope here is **deployment scoping only**. This ADR does not add a
-Worker, endpoint, branding, or disclosure copy.
+This ADR records the surface decision, its historical implementation proof
+and the acceptance contract for subsequent revisions. Branding and disclosure
+copy remain separate work.
 
 ## Decision
 
@@ -94,6 +96,11 @@ Signing algorithm:
 - shared secret: `OPERATOR_HMAC_KEY_<KEY_ID>` from Infisical
 - replay window: ±300 seconds
 
+For compatibility, punctuation in a key ID maps to `_` for secret lookup.
+The verified identity uses that same canonical ID for telemetry and the
+Durable Object limiter, so aliases share one counter. Timestamps are whole
+decimal seconds and must fit a safe integer.
+
 Why this, not the alternatives:
 
 - **not static bearer**: a bearer secret copied once can be replayed
@@ -139,13 +146,13 @@ be linked from the landing page, sitemap, or public docs.
 
 Per-operator rate limit:
 
-- `6` requests per minute per `X-WSA-Key-Id`
+- `6` requests per minute per canonical operator key ID
 - `2` in-flight requests maximum per operator
 
 Enforcement location:
 
 - inside the Worker
-- backed by a single Durable Object keyed by `X-WSA-Key-Id`
+- backed by a single Durable Object keyed by the canonical operator key ID
 
 Why this shape:
 
@@ -160,11 +167,18 @@ Reject status on rate limit:
 - `429`
 - JSON body includes `reason=rate_limited`
 
-Reject status on monthly xAI hard-cap exhaustion:
+Reject status when recorded monthly xAI spend reaches the configured cap:
 
 - `429`
 - JSON body includes `reason=budget_exhausted`
 - the Worker must not call xAI in this case
+
+The guard reads persisted monthly costs before a call. It is not an atomic
+global spend reservation: concurrent calls or one call's cost can cross the
+remaining allowance. A failed success-telemetry write returns `500`, and its
+provider charge may be missing from the ledger. Storage outages require an
+operator pause and reconciliation; a strict global spend ceiling needs a
+separate reservation design.
 
 ### 5. Source-text handling: Lane-2 only, memory-only, no body logging
 
@@ -225,13 +239,26 @@ The first deployed surface will persist xAI telemetry events to a
 dedicated private R2 bucket:
 
 - bucket: `wsa-telemetry`
-- object prefix: `xai/<YYYY-MM>/<requestId>.json`
+- provider events: `xai/<YYYY-MM>/<generated-event-uuid>.json`
+- sampled auth failures: `auth/<YYYY-MM>/<generated-event-uuid>.json`
+- `requestId` remains correlation data inside the record, never its storage key
+- version metadata adds the full Worker version ID and, when tagged with a
+  full source SHA, `workerSourceSha`; neither is exposed in the API response
 
 Why:
 
 - the provider layer already emits append-only telemetry events
 - R2 is already a proven storage primitive in this project
 - a dedicated bucket avoids mixing telemetry with email evidence
+
+Auth telemetry stores only `missing` or `provided` for the unverified key
+header. At most six failures per minute per Worker isolate are sampled,
+with synchronous admission before storage work. Writes run through
+`ctx.waitUntil`, catch storage errors and never delay or replace `401`.
+Isolate resets and fleet scaling can exceed that sample count globally;
+this is not a perimeter abuse quota. Auth records are excluded from monthly
+provider-cost scans. R2 retention and perimeter controls require separate
+operational configuration.
 
 ### Response shape
 
@@ -277,6 +304,21 @@ The implementation PR for this ADR must prove:
      `reason=budget_exhausted`
    - request does not fall through to a `500`
 
+Historical observations for this ADR were recorded on `2026-04-20` via the
+redacted artifact bundle in
+[`artifacts/adr-0007-proof-20260420/`](../../artifacts/adr-0007-proof-20260420/),
+including signed `200`, unsigned `401`, promotion-decision evidence,
+and telemetry references for auth-failure, success, and
+budget-exhausted paths.
+
+The bundle lacks a full deployed source SHA and build digest; its version
+ID is truncated, and a later auth patch is not linked to that version.
+Four concurrent probes show two in-flight admissions and two rejections,
+not independent proof of the six-per-minute limit. Budget restoration
+records an upload success without readback of the restored value. Preserve
+these files as dated observations rather than current certification.
+Use the [operator runbook](../ops/extract-api-runbook.md) for new proof.
+
 ## Consequences
 
 Positive:
@@ -299,10 +341,14 @@ they buy honest proof, bounded spend, and a cleaner POPIA story.
 ## Rollout
 
 1. Deploy `extract-api.witnesssouthafrica.org` as a private Worker
-   route.
+   custom domain.
 2. Add HMAC verification and timestamp replay checks.
 3. Add Durable Object per-operator throttling.
 4. Add R2 telemetry sink (`wsa-telemetry`).
 5. Call `@wsa/evidence-engine.extractClaims()` from the Worker.
 6. Prove the five acceptance checks above.
 7. Only after that, start the brand/disclosure lane.
+
+The April 20 bundle records observations for items 1-6 with the provenance
+limits above. Deployment and acceptance of the hardened revision remain
+pending fresh proof. Item 7 remains separate.

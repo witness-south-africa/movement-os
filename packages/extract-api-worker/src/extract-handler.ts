@@ -5,6 +5,7 @@ import {
 } from '@wsa/evidence-engine';
 import type { SignatureSecretEnv } from './auth.js';
 import { AuthError, verifySignedRequest } from './auth.js';
+import { createAuthTelemetrySampler } from './auth-telemetry.js';
 import {
   BudgetExhaustedError,
   assertBudgetAvailable,
@@ -23,15 +24,18 @@ import {
   parseExtractRequestEnvelope,
 } from './schemas.js';
 import {
+  buildAuthFailureTelemetryRecord,
   buildBudgetExhaustedTelemetryRecord,
   buildErrorTelemetryRecord,
   buildSuccessTelemetryRecord,
   writeTelemetryRecord,
+  withWorkerVersion,
 } from './telemetry.js';
 
 const DEFAULT_MODEL = 'grok-4-fast-reasoning';
 const DEFAULT_API_BASE_URL = 'https://api.x.ai/v1';
 const DEFAULT_REPLAY_WINDOW_SECONDS = 300;
+const defaultAuthTelemetryAdmission = createAuthTelemetrySampler();
 type XaiClient = XaiEvidenceEngineConfig['client'];
 type XaiCreateCompletion = XaiClient['chat']['completions']['create'];
 type XaiChatCompletionRequest = Parameters<XaiCreateCompletion>[0];
@@ -45,6 +49,7 @@ export interface Env extends RateLimiterEnv, SignatureSecretEnv {
   readonly XAI_API_BASE_URL?: string;
   readonly XAI_BUDGET_MONTHLY_CAP_USD_TICKS?: string;
   readonly AUTH_REPLAY_WINDOW_SECONDS?: string;
+  readonly CF_VERSION_METADATA?: WorkerVersionMetadata;
 }
 
 export interface ExtractHandlerDeps {
@@ -54,18 +59,27 @@ export interface ExtractHandlerDeps {
   readonly assertBudget?: typeof assertBudgetAvailable;
   readonly writeTelemetry?: typeof writeTelemetryRecord;
   readonly createXaiClient?: (env: Env) => XaiClient;
+  readonly admitAuthTelemetry?: (now: Date) => boolean;
 }
 
 export async function handleExtractRequest(
   request: Request,
   env: Env,
   deps: ExtractHandlerDeps = {},
+  context?: Pick<ExecutionContext, 'waitUntil'>,
 ): Promise<Response> {
   const now = deps.now ?? (() => new Date());
   const verifySignature = deps.verifySignature ?? verifySignedRequest;
   const acquireLease = deps.acquireLease ?? acquireRateLimitLease;
   const assertBudget = deps.assertBudget ?? assertBudgetAvailable;
-  const writeTelemetry = deps.writeTelemetry ?? writeTelemetryRecord;
+  const write: typeof writeTelemetryRecord =
+    deps.writeTelemetry ?? writeTelemetryRecord;
+  const writeTelemetry: typeof writeTelemetryRecord = (
+    bucket,
+    monthKey,
+    record,
+  ) =>
+    write(bucket, monthKey, withWorkerVersion(record, env.CF_VERSION_METADATA));
   const createClient = deps.createXaiClient ?? createFetchXaiClient;
   const replayWindowSeconds = readPositiveInteger(
     env.AUTH_REPLAY_WINDOW_SECONDS,
@@ -75,6 +89,7 @@ export async function handleExtractRequest(
   let lease: Awaited<ReturnType<typeof acquireLease>> | undefined;
   let envelope: ExtractRequestEnvelope | undefined;
   let keyId = '';
+  const model = env.XAI_MODEL ?? DEFAULT_MODEL;
 
   try {
     const verified = await verifySignature(
@@ -95,7 +110,7 @@ export async function handleExtractRequest(
 
     const engine = createXaiEvidenceEngine({
       client: createClient(env),
-      model: env.XAI_MODEL ?? DEFAULT_MODEL,
+      model,
     });
     const result = await engine.extractClaims(envelope.extract);
     await writeTelemetry(
@@ -112,6 +127,24 @@ export async function handleExtractRequest(
     return jsonResponse(200, mapExtractionResultToResponse(result));
   } catch (error) {
     if (error instanceof AuthError) {
+      const observedAt = now();
+      const admit = deps.admitAuthTelemetry ?? defaultAuthTelemetryAdmission;
+      if (admit(observedAt)) {
+        const record = buildAuthFailureTelemetryRecord({
+          requestId: `auth-${crypto.randomUUID()}`,
+          keyId: request.headers.get('x-wsa-key-id')?.trim()
+            ? 'provided'
+            : 'missing',
+          model,
+          reason: error.reason,
+        });
+        const pending = Promise.resolve()
+          .then(() =>
+            writeTelemetry(env.WSA_TELEMETRY, toMonthKey(observedAt), record),
+          )
+          .catch(() => undefined);
+        context?.waitUntil(pending);
+      }
       return jsonResponse(401, { reason: error.reason });
     }
     if (error instanceof ExtractRequestValidationError) {
@@ -121,28 +154,34 @@ export async function handleExtractRequest(
       return jsonResponse(429, { reason: error.reason });
     }
     if (error instanceof BudgetExhaustedError && envelope !== undefined) {
-      await writeTelemetry(
-        env.WSA_TELEMETRY,
-        error.state.monthKey,
-        buildBudgetExhaustedTelemetryRecord({
-          keyId,
-          input: envelope.extract,
-          sourceByteLength: sourceByteLengthForInput(envelope.extract),
-          model: env.XAI_MODEL ?? DEFAULT_MODEL,
-        }),
+      const input = envelope.extract;
+      await bestEffortTelemetry(() =>
+        writeTelemetry(
+          env.WSA_TELEMETRY,
+          error.state.monthKey,
+          buildBudgetExhaustedTelemetryRecord({
+            keyId,
+            input,
+            sourceByteLength: sourceByteLengthForInput(input),
+            model,
+          }),
+        ),
       );
       return jsonResponse(429, { reason: error.reason });
     }
     if (envelope !== undefined) {
-      await writeTelemetry(
-        env.WSA_TELEMETRY,
-        toMonthKey(now()),
-        buildErrorTelemetryRecord({
-          keyId,
-          input: envelope.extract,
-          sourceByteLength: sourceByteLengthForInput(envelope.extract),
-          model: env.XAI_MODEL ?? DEFAULT_MODEL,
-        }),
+      const input = envelope.extract;
+      await bestEffortTelemetry(() =>
+        writeTelemetry(
+          env.WSA_TELEMETRY,
+          toMonthKey(now()),
+          buildErrorTelemetryRecord({
+            keyId,
+            input,
+            sourceByteLength: sourceByteLengthForInput(input),
+            model,
+          }),
+        ),
       );
     }
     return jsonResponse(500, { reason: 'internal_error' });
@@ -223,7 +262,9 @@ function parseJsonValue(rawBody: string): unknown {
     return JSON.parse(rawBody) as unknown;
   } catch (error) {
     if (error instanceof SyntaxError) {
-      throw new ExtractRequestValidationError('request body must be valid JSON');
+      throw new ExtractRequestValidationError(
+        'request body must be valid JSON',
+      );
     }
     throw error;
   }
@@ -231,4 +272,12 @@ function parseJsonValue(rawBody: string): unknown {
 
 function jsonResponse(status: number, body: unknown): Response {
   return Response.json(body, { status });
+}
+
+async function bestEffortTelemetry(write: () => Promise<void>): Promise<void> {
+  try {
+    await write();
+  } catch {
+    // Failure records must not replace the intended response or leak storage errors.
+  }
 }
