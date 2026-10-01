@@ -10,6 +10,9 @@ Gitleaks scans Git history using a full-depth checkout. Semgrep scans the
 checked-out tree with strict error handling and fails when it finds issues.
 The dependency-review job also preserves action failures and rejects missing
 outputs rather than reporting a false zero.
+The dependency-audit job audits the complete lockfile against the public
+registry and fails for advisories at every severity, including existing
+dependencies that are outside the dependency-review change set.
 
 Every scanner job returns a failure for findings or execution/report errors.
 Logs publish counts, file/rule/line locations and whitelisted Semgrep error
@@ -54,12 +57,16 @@ sources and reject package trust downgrades (`trustPolicy: no-downgrade`).
 These are **resolution/update-time protections**. pnpm 10 frozen installs
 skip resolution and do not re-audit locked release age, trust or exotic
 sources. CI preserves the reviewed lockfile with `--frozen-lockfile` and its
-integrity hashes; independently review every lockfile change. No policy
-exclusions are configured.
+integrity hashes; independently review every lockfile change. The two exact
+historical trust exceptions, parent constraints and Dependabot's security
+update age override are recorded in
+[dependency remediation](./dependency-remediation.md).
 
 `strictDepBuilds` rejects unreviewed dependency lifecycle scripts. The
-version-specific `allowBuilds` entries cover the six native-tool installers
-in the current lockfile: SWC, esbuild, Nx, sharp, unrs-resolver and workerd.
+version-specific `allowBuilds` entries cover SWC, esbuild, Nx, two
+unrs-resolver versions and workerd. Parcel watcher's source-build script is
+explicitly denied; its locked prebuilt binding is used. The selected sharp
+release has no installation lifecycle script.
 Their version changes require a fresh script review; other dependencies
 cannot gain automatic permission to run installation scripts.
 

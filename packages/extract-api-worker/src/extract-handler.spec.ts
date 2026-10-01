@@ -514,12 +514,7 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
   });
 
   it('creates fetch requests against the configured API base URL and forwards the signal', async () => {
-    const originalFetch = global.fetch;
-    const fetchSpy = jest.fn<
-      ReturnType<typeof fetch>,
-      Parameters<typeof fetch>
-    >();
-    global.fetch = fetchSpy;
+    const fetchSpy = jest.spyOn(global, 'fetch');
 
     try {
       fetchSpy.mockResolvedValue(
@@ -566,17 +561,12 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
         }),
       );
     } finally {
-      global.fetch = originalFetch;
+      fetchSpy.mockRestore();
     }
   });
 
   it('throws when the provider responds with a non-ok status', async () => {
-    const originalFetch = global.fetch;
-    const fetchSpy = jest.fn<
-      ReturnType<typeof fetch>,
-      Parameters<typeof fetch>
-    >();
-    global.fetch = fetchSpy;
+    const fetchSpy = jest.spyOn(global, 'fetch');
 
     try {
       fetchSpy.mockResolvedValue(new Response('bad', { status: 502 }));
@@ -593,7 +583,7 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
         }),
       ).rejects.toThrow('provider_request_failed:502');
     } finally {
-      global.fetch = originalFetch;
+      fetchSpy.mockRestore();
     }
   });
 

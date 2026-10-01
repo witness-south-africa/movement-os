@@ -4,12 +4,6 @@
   "include": [],
   "references": [
     {
-      "path": "../schemas"
-    },
-    {
-      "path": "../evidence-engine"
-    },
-    {
       "path": "./tsconfig.lib.json"
     },
     {

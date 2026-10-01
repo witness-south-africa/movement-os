@@ -5,14 +5,20 @@ packageManagerStrictVersion: true
 # Resolution/update policies; frozen installs preserve the reviewed lockfile.
 minimumReleaseAge: 10080
 trustPolicy: no-downgrade
+# Historical metadata gaps; unchanged base versions reviewed in #40.
+trustPolicyExclude:
+  - 'semver@6.3.1'
+  - 'pino@9.14.0'
 blockExoticSubdeps: true
 
 strictDepBuilds: true
 # Reviewed native-tool installation scripts; version updates require review.
 allowBuilds:
-  '@swc/core@1.5.29': true
-  'esbuild@0.27.3': true
-  'nx@21.6.11': true
-  'sharp@0.34.5': true
+  # Prebuilt watcher binding is used; no source compilation is permitted.
+  '@parcel/watcher@2.6.0': false
+  '@swc/core@1.16.2': true
+  'esbuild@0.28.1': true
+  'nx@22.7.12': true
   'unrs-resolver@1.11.1': true
-  'workerd@1.20260415.1': true
+  'unrs-resolver@1.12.2': true
+  'workerd@1.20260730.1': true

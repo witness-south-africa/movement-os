@@ -4,18 +4,6 @@
   "include": [],
   "references": [
     {
-      "path": "../schemas"
-    },
-    {
-      "path": "../guardrails"
-    },
-    {
-      "path": "../agent-xai"
-    },
-    {
-      "path": "../agent-contracts"
-    },
-    {
       "path": "./tsconfig.lib.json"
     },
     {
