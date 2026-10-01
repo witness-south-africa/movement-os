@@ -18,6 +18,18 @@ and limitations before using them for a current deployment verdict.
 `MERGEABLE` alone does not establish merge readiness, and a head change
 requires a fresh check of commit-bound evidence.
 
+For a required-check policy change, follow the
+[security rollout](../security-scans.md#required-check-rollout). Verify
+the actual jobs and their check providers on a docs-only PR before live
+promotion, then confirm the exact requirements through live settings
+readback. A checked-in ruleset or a successful settings request does not
+establish enforcement. The proof PR must satisfy the newly active checks
+before its protected merge.
+
+On a main push, dependency review is intentionally skipped because there
+is no PR diff. Its successful execution on the proof PR remains required;
+report that separately from the push-applicable scanner results.
+
 Output a stage-specific verdict with the full head SHA, reasons, inspected
 files, evidence and residual risk:
 
