@@ -16,6 +16,11 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
   "dependencies": {},
+  "pnpm": {
+    "overrides": {
+      "@verdaccio/local-storage-legacy>lodash": "4.18.1"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@nx/eslint": "21.6.11",
