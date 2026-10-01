@@ -17,7 +17,6 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  security-events: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,47 +27,74 @@ jobs:
     name: semgrep
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - name: Scan with Semgrep action
-        continue-on-error: true
-        uses: semgrep/semgrep-action@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          config: |
-            p/default
-            p/typescript
-            p/javascript
-            p/secrets
+          persist-credentials: false
+      - name: Scan with Semgrep CLI
+        shell: bash
+        run: |
+          umask 077
+          report_dir="$RUNNER_TEMP/semgrep-report"
+          mkdir -p "$report_dir"
+          status=0
+          # Semgrep 1.178.0, official image pinned by digest.
+          docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/src,readonly" \
+            --mount "type=bind,src=$report_dir,dst=/reports" \
+            --workdir /src --entrypoint semgrep \
+            semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b \
+            scan --strict --error --metrics=off --disable-version-check \
+            --config p/default --config p/typescript --config p/javascript --config p/secrets \
+            --json --output /reports/semgrep.json \
+            > "$report_dir/diagnostics.log" 2>&1 || status=$?
+          python3 -B scripts/security_scan_report.py semgrep "$report_dir/semgrep.json" "$status"
 
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - name: Scan with gitleaks action
-        continue-on-error: true
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          persist-credentials: false
+      - name: Install free Gitleaks CLI
+        shell: bash
+        run: |
+          umask 077
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$RUNNER_TEMP/gitleaks.tar.gz" \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          printf '%s  %s\n' \
+            551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb \
+            "$RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" version
+      - name: Scan full history with Gitleaks CLI
+        shell: bash
+        run: |
+          umask 077
+          report_dir="$RUNNER_TEMP/gitleaks-report"
+          mkdir -p "$report_dir"
+          status=0
+          "$RUNNER_TEMP/gitleaks" git --redact=100 --no-banner \
+            --report-format json --report-path "$report_dir/gitleaks.json" . \
+            > "$report_dir/diagnostics.log" 2>&1 || status=$?
+          python3 -B scripts/security_scan_report.py gitleaks "$report_dir/gitleaks.json" "$status"
 
   dependency-review:
     name: dependency-review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Review dependency changes
         id: review
-        continue-on-error: true
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           license-check: true
           vulnerability-check: true
@@ -76,6 +102,7 @@ jobs:
       - name: Report dependency-review findings count
         if: always()
         env:
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
           VULNERABLE_CHANGES: ${{ steps.review.outputs.vulnerable-changes }}
           INVALID_LICENSE_CHANGES: ${{ steps.review.outputs.invalid-license-changes }}
           DENIED_CHANGES: ${{ steps.review.outputs.denied-changes }}
@@ -83,17 +110,23 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import sys
+
+          if os.environ.get('REVIEW_OUTCOME') != 'success':
+            sys.exit('dependency-review failed; no clean result available')
 
           def count_payload(value) -> int:
             if isinstance(value, list):
               return len(value)
             if isinstance(value, dict):
               return sum(count_payload(item) for item in value.values())
-            return 0
+            raise ValueError('invalid dependency-review output')
 
           def count(name: str) -> int:
             raw = os.environ.get(name, '').strip()
-            return count_payload(json.loads(raw)) if raw else 0
+            if not raw:
+              sys.exit('dependency-review output missing; no clean result available')
+            return count_payload(json.loads(raw))
 
           total = (
             count('VULNERABLE_CHANGES')

@@ -1,5 +1,10 @@
 const AUTH_RESULT_PATTERN =
   /\b(pass|fail|softfail|neutral|none|temperror|permerror)\b/i;
+const AUTH_MECHANISM_PATTERNS = {
+  spf: /\bspf=([^;\s]+)/i,
+  dkim: /\bdkim=([^;\s]+)/i,
+  dmarc: /\bdmarc=([^;\s]+)/i,
+};
 
 export type MailAuthVerdict =
   | 'pass'
@@ -32,14 +37,13 @@ function extractHeader(headers: Headers, name: string): string | null {
 
 function extractAuthResult(
   authenticationResults: string | null,
-  mechanism: 'spf' | 'dkim' | 'dmarc',
+  mechanism: keyof typeof AUTH_MECHANISM_PATTERNS,
 ): MailAuthVerdict {
   if (!authenticationResults) {
     return 'unknown';
   }
 
-  const pattern = new RegExp(`\\b${mechanism}=([^;\\s]+)`, 'i');
-  const match = pattern.exec(authenticationResults);
+  const match = AUTH_MECHANISM_PATTERNS[mechanism].exec(authenticationResults);
   return parseVerdict(match?.[1] ?? null);
 }
 

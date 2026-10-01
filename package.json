@@ -4,11 +4,14 @@
   "description": "Witness South Africa — civic accountability platform (monorepo root).",
   "license": "Apache-2.0",
   "private": true,
+  "packageManager": "pnpm@10.34.6",
   "engines": {
     "node": ">=22.0.0",
-    "pnpm": ">=9.0.0"
+    "npm": "<0",
+    "pnpm": "10.34.6"
   },
   "scripts": {
+    "preinstall": "node scripts/verify-package-manager.mjs",
     "build": "nx run-many -t build",
     "test": "nx run-many -t test",
     "lint": "nx run-many -t lint",
