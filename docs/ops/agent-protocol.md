@@ -151,7 +151,10 @@ PR head. Also edit a commit-bound review without changing its signature,
 then verify the read-only observer triggers a successful trusted publisher.
 Verify check reuse, refreshed provenance and success. A merged
 PR can be audited for rollout proof; a closed unmerged PR is ignored.
-This governance slice does not require a product deployment.
+Publisher and role-documentation changes can be accepted without a product
+deployment. For runtime slices, source merge does not prove deployment:
+name the deployed revision and runtime observations, or explicitly leave
+adoption pending. Follow the relevant product runbook for runtime proof.
 
 L1 is still a procedural seat. Its verdict names the slice, full head SHA
 and stage, distinguishing local validation, hosted CI, quorum, merge and

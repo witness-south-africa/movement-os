@@ -1,0 +1,6 @@
+{
+  "status": 429,
+  "reason": "budget_exhausted",
+  "requestIdPrefix": "budget-1",
+  "containsProviderAttribution": false
+}

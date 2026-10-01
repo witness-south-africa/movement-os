@@ -1,0 +1,11 @@
+{
+  "telemetryObjectRef": "xai/2026-04/budget-1....json",
+  "requestIdPrefix": "budget-1",
+  "model": "grok-4-fast-reasoning",
+  "inputTokens": 0,
+  "cachedInputTokens": 0,
+  "costInUsdTicks": null,
+  "outcome": "budget_exhausted",
+  "status": null,
+  "keyIdRef": "OP..."
+}

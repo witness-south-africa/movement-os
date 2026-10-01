@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "reason": null,
+  "requestIdPrefix": "req-1776",
+  "summaryPresent": true,
+  "claimCount": 1,
+  "promotionDecisionPresent": true,
+  "containsProviderAttribution": false
+}

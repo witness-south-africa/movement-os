@@ -1,0 +1,11 @@
+{
+  "telemetryObjectRef": "xai/2026-04/req-1776....json",
+  "requestIdPrefix": "req-1776",
+  "model": "grok-4-fast-reasoning",
+  "inputTokens": 597,
+  "cachedInputTokens": 149,
+  "costInUsdTicks": 5765500,
+  "outcome": "success",
+  "status": "completed",
+  "keyIdRef": "OP..."
+}

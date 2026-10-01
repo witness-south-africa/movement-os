@@ -1,0 +1,5 @@
+2026-04-20T18:20:51+02:00 INF Injecting 6 Infisical secrets into your application process
+
+wrangler 4.83.0 (update available 4.84.0)
+Creating the secret for the Worker "[redacted-worker]"
+Success! Uploaded secret XAI_BUDGET_MONTHLY_CAP_USD_TICKS

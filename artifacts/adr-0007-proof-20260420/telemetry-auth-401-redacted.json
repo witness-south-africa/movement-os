@@ -1,0 +1,14 @@
+{
+  "telemetryObjectRef": "xai/2026-04/auth-....json",
+  "requestIdPrefix": "auth-mo7",
+  "keyIdRef": "missing",
+  "model": "grok-4-fast-reasoning",
+  "outcome": "error",
+  "errorReason": "missing_signature_headers",
+  "httpStatus": 401,
+  "stage": "auth",
+  "inputTokens": 0,
+  "cachedInputTokens": 0,
+  "outputTokens": 0,
+  "totalTokens": 0
+}

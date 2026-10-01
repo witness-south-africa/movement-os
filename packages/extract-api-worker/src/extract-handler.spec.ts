@@ -144,6 +144,10 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
   });
 
   it('returns 401 on auth failure', async () => {
+    const telemetryWrites: Array<{
+      monthKey: string;
+      record: Record<string, unknown>;
+    }> = [];
     const response = await handleExtractRequest(
       new Request('https://extract-api.witnesssouthafrica.org/v1/extract', {
         method: 'POST',
@@ -154,8 +158,16 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
         OPERATOR_RATE_LIMITER: {} as DurableObjectNamespace,
       } as Env,
       {
+        now: () => new Date('2026-04-18T19:00:00.000Z'),
         verifySignature: () => {
           throw new AuthError('signature_mismatch');
+        },
+        writeTelemetry: (_bucket, monthKey, record) => {
+          telemetryWrites.push({
+            monthKey,
+            record: record as unknown as Record<string, unknown>,
+          });
+          return Promise.resolve();
         },
       },
     );
@@ -164,6 +176,22 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
     await expect(response.json()).resolves.toMatchObject({
       reason: 'signature_mismatch',
     });
+    expect(telemetryWrites).toHaveLength(1);
+    expect(telemetryWrites[0]?.monthKey).toBe('2026-04');
+    expect(telemetryWrites[0]?.record).toMatchObject({
+      keyId: 'missing',
+      outcome: 'error',
+      errorReason: 'signature_mismatch',
+      httpStatus: 401,
+      stage: 'auth',
+      inputTokens: 0,
+      totalTokens: 0,
+    });
+    expect(telemetryWrites[0]?.record.requestId).toEqual(
+      expect.stringMatching(/^auth-[a-f0-9-]{36}$/),
+    );
+    expect(telemetryWrites[0]?.record.sourceRef).toBeUndefined();
+    expect(telemetryWrites[0]?.record.sourceSha256).toBeUndefined();
   });
 
   it('returns 429 when rate limited', async () => {

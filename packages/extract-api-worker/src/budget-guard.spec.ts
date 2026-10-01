@@ -83,6 +83,15 @@ describe('@wsa/extract-api-worker/budget-guard', () => {
     ).toBe(123);
   });
 
+  it.each(['123junk', '1.5', '-1', '', '9007199254740993'])(
+    'rejects malformed or unsafe budget cap %s',
+    (value) => {
+      expect(() =>
+        readBudgetCapUsdTicks({ XAI_BUDGET_MONTHLY_CAP_USD_TICKS: value }),
+      ).toThrow('missing or invalid');
+    },
+  );
+
   it('formats a YYYY-MM month key', () => {
     expect(toMonthKey(new Date('2026-04-18T00:00:00.000Z'))).toBe('2026-04');
   });
