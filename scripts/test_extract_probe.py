@@ -20,7 +20,8 @@ class ProbeTests(unittest.TestCase):
     def response_body(self):
         return {'requestId': 'probe-001', 'summary': 'private output', 'claims': [{
             'requestedStatus': 'contested', 'effectiveStatus': 'contested',
-            'claim': {'id': 'claim-id', 'text': 'private claim', 'status': 'contested', 'sourceRef': {'kind': 'artefact', 'id': 'source-id'}},
+            'claim': {'id': 'claim-id', 'text': 'private claim', 'status': 'contested', 'sourceRef': {'kind': 'artefact', 'id': 'source-id'},
+                      'extractedBy': 'agent:evidence-engine', 'assertedAt': '2026-10-01T08:00:00Z', 'validFrom': None, 'validTo': None},
             'evidencePreview': {'id': 'evidence-id', 'kind': 'other', 'url': 'https://example.org/source', 'fetchedAt': '2026-10-01T08:00:00Z', 'sha256': 'a' * 64, 'supports': 'supports'},
             'promotionDecision': {'ok': True, 'reasons': []}}]}
 
@@ -75,6 +76,18 @@ class ProbeTests(unittest.TestCase):
                 with self.subTest(body=body), self.assertRaises(ValueError):
                     extract_probe.capture('https://operator.invalid/v1/extract', 'signed', body, 'OP01', 'test-secret')
         send.assert_not_called()
+
+    def test_claim_requires_extractor_and_all_temporal_fields(self):
+        for field in ('extractedBy', 'assertedAt', 'validFrom', 'validTo'):
+            with self.subTest(field=field):
+                response = self.response_body()
+                del response['claims'][0]['claim'][field]
+                self.assertFalse(extract_probe.complete_claim(response['claims'][0]))
+        for field, invalid in (('extractedBy', 'unknown'), ('assertedAt', None), ('validFrom', '2026-10-01'), ('validTo', '2026-02-30T00:00:00Z')):
+            with self.subTest(field=field, invalid=invalid):
+                response = self.response_body()
+                response['claims'][0]['claim'][field] = invalid
+                self.assertFalse(extract_probe.complete_claim(response['claims'][0]))
 
     def test_budget_http_error_response_is_captured_without_body_leakage(self):
         error = extract_probe.urllib.error.HTTPError('https://operator.invalid', 429, 'private error', {}, io.BytesIO(b'{"reason":"budget_exhausted"}'))

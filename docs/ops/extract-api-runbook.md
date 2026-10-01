@@ -89,7 +89,9 @@ helper prints status, known reason, response digest and structural flags;
 it never prints request/response text or headers. Run from the repo root:
 
 Signed proof requires a valid input request ID, an equal returned request ID
-and complete claim/promotion/evidence fields. Attribution checks inspect
+and required claim/promotion/evidence fields, including extractor and temporal
+provenance. This is structural validation; source truth and the promotion
+decision still need the matching telemetry and runtime review. Attribution checks inspect
 decoded JSON, including escaped strings. The emitted request-ID digest joins
 the corresponding telemetry projection without publishing its raw ID.
 

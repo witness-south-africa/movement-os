@@ -24,6 +24,16 @@ def nonempty_string(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def iso_timestamp(value):
+    if not isinstance(value, str) or re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', value) is None:
+        return False
+    try:
+        datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return True
+    except ValueError:
+        return False
+
+
 def complete_claim(item):
     if not isinstance(item, dict):
         return False
@@ -33,18 +43,26 @@ def complete_claim(item):
     statuses = {'conclusive', 'high-confidence', 'contested', 'insufficient-record', 'destroyed-or-missing-record-suspected'}
     source = claim.get('sourceRef')
     reasons = promotion.get('reasons')
+    time_fields_present = (iso_timestamp(claim.get('assertedAt'))
+                           and all(name in claim and (claim[name] is None or iso_timestamp(claim[name]))
+                                   for name in ('validFrom', 'validTo')))
     return (item.get('requestedStatus') in statuses
             and item.get('effectiveStatus') in statuses
             and claim.get('status') == item['effectiveStatus']
             and all(nonempty_string(claim.get(name)) for name in ('id', 'text'))
+            and claim.get('extractedBy') in {'agent:evidence-engine', 'agent:evidence-intake', 'agent:source-verifier', 'human'}
+            and time_fields_present
             and isinstance(source, dict) and source.get('kind') in {'artefact', 'intake'}
             and nonempty_string(source.get('id'))
             and all(nonempty_string(evidence.get(name)) for name in ('id', 'kind', 'url', 'fetchedAt', 'sha256', 'supports'))
             and re.fullmatch(r'[a-fA-F0-9]{64}', evidence['sha256']) is not None
+            and iso_timestamp(evidence.get('fetchedAt'))
+            and evidence.get('kind') in {'court-record', 'government-publication', 'statssa', 'commission', 'news-article', 'other'}
+            and evidence.get('supports') in {'supports', 'contradicts', 'inconclusive'}
             and isinstance(promotion.get('ok'), bool)
             and isinstance(reasons, list)
             and all(isinstance(reason, dict) and nonempty_string(reason.get('code'))
-                    and nonempty_string(reason.get('severity')) for reason in reasons))
+                    and reason.get('severity') in {'warn', 'block'} for reason in reasons))
 
 
 def capture(url, mode, body=b'{}', key_id=None, secret=None):
