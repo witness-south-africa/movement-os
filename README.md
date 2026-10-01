@@ -87,7 +87,9 @@ This sentence is the platform's public API. It is pinned in
   - operational runbooks for DNS, GitHub Pages, email worker deployment, and
     Infisical secret handling.
 - `.github/workflows/`
-  - CI, report-only security scanners, and quorum-audit automation.
+  - CI, [security scanners with visible failures](docs/ops/security-scans.md),
+    and quorum-audit automation.
+    Security scans remain non-required until findings are triaged under #22.
 - `CODEOWNERS`
   - ADR-0008 governance ownership map. Honest note: with only one current
     write-capable identity, it records intended ownership but does not create
