@@ -97,10 +97,12 @@ dismissing the review. Withdrawal triggers a fresh evaluation.
 
 ## Required check and certification
 
-The live `main-protection` ruleset requires `quorum-audit` alongside
-`lint`, `typecheck`, `test` and `build`. The checked-in
-[ruleset snapshot](../../ruleset-main.json) records that configuration;
-changing it does not change GitHub settings.
+The `main-protection` policy requires `quorum-audit` alongside
+`lint`, `typecheck`, `test`, `build` and the
+[four security checks](./security-scans.md#required-check-rollout). The
+checked-in [ruleset snapshot](../../ruleset-main.json) declares the intended
+configuration; changing it does not change GitHub settings. Verify the
+live ruleset and staged rollout before treating a new requirement as active.
 
 The runner job is named `quorum-publisher`; only its published PR-head
 check is named `quorum-audit`. Runs for one PR serialize publication after

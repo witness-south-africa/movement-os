@@ -22,12 +22,42 @@ directory and are not uploaded. Gitleaks also redacts its raw report.
 `scripts/security_scan_report.py` returns 0 for a completed clean scan,
 1 for findings, and 2 when no clean execution result is available.
 
-These security jobs are not required by the live main ruleset yet. A red
-Semgrep job can mean a successful scan with existing findings; inspect its
+A red Semgrep job can mean a successful scan with findings; inspect its
 counts and locations before calling it an execution regression. Triage
-findings under [#22](https://github.com/witness-south-africa/movement-os/issues/22)
-before promoting security checks to required. Do not discard rules or add
-blanket exclusions to make the status green.
+findings under [#22](https://github.com/witness-south-africa/movement-os/issues/22).
+Do not discard rules or add blanket exclusions to make the status green.
+
+## Required-check rollout
+
+The intended `main-protection` policy requires `semgrep`, `gitleaks`,
+`dependency-review` and `dependency-audit`, alongside `lint`, `typecheck`,
+`test`, `build` and `quorum-audit`. The four new security requirements name
+GitHub Actions (integration ID `15368`) as their check provider. Existing
+code/governance requirements retain their provider configuration.
+
+The security workflow runs on every PR targeting main and every main push,
+including changes confined to documentation or Markdown. Keep those
+triggers unconditional: skipping an entire required workflow leaves its
+checks unreported and blocks a PR. Dependency review executes on PRs; its
+job is intentionally skipped on main pushes, where there is no PR diff.
+
+The [ruleset snapshot](../../ruleset-main.json) is the reviewed intended
+configuration. It does not apply live settings. Complete promotion in this
+order:
+
+1. Merge the unconditional workflow after independent review, successful
+   code/security jobs and the existing protected-merge checks.
+2. Open a docs-only PR based on that landed main revision. Verify that all
+   four security jobs actually execute and succeed on its current head.
+3. Freeze that head and obtain independent quorum and lifecycle evidence.
+   Compare a fresh live ruleset with the reviewed update: preserve all
+   existing checks, strict base testing, squash/linear history and no bypass.
+4. Apply the reviewed policy only with session authorization, then read
+   back the live ruleset. Confirm all nine exact contexts and the four
+   provider IDs; a source snapshot or a successful API request is insufficient.
+5. Verify the docs-only PR satisfies all nine live required checks, merge
+   through protection and verify landed-main CI/scans and quorum event paths.
+   Record the live settings and evidence in #22 before marking S2 complete.
 
 The initial scan of main `4be0baa9dbe4d22bb6b83b72d91ac9dcebc59b3d` on
 2026-10-01 completed with zero Gitleaks findings and 24 Semgrep findings,

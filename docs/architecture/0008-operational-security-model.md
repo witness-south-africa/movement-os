@@ -103,9 +103,12 @@ The repository will support this model with two in-repo artefacts:
   reviewer, and controller signatures exist on the current PR head SHA
   on both PR-synchronize events and later PR discussion events
 
-The live `main-protection` ruleset now requires `quorum-audit` alongside
-`lint`, `typecheck`, `test` and `build`. The checked-in `ruleset-main.json`
-is a snapshot of the live configuration, not a deployment mechanism.
+The `main-protection` policy requires `quorum-audit` alongside
+`lint`, `typecheck`, `test`, `build` and the
+[four security checks](../ops/security-scans.md#required-check-rollout).
+The checked-in `ruleset-main.json` declares the intended configuration,
+not a deployment mechanism. Live requirements are established by settings
+application and independent readback, following the staged rollout.
 
 The workflow's runner job is `quorum-publisher`; its managed PR-head
 check is `quorum-audit`. Those names differ to prevent conflicting job

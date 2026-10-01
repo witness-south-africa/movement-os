@@ -129,11 +129,14 @@ repository write, maintain or admin access. Roles use separate review
 contexts, while only one GitHub identity currently has write access;
 credential separation remains an identity-hardening task.
 
-The live `main-protection` ruleset requires `quorum-audit` alongside
-`lint`, `typecheck`, `test` and `build`. The runner job is named
+The `main-protection` policy requires `quorum-audit` alongside
+`lint`, `typecheck`, `test`, `build` and the
+[four security checks](./docs/ops/security-scans.md#required-check-rollout).
+The runner job is named
 `quorum-publisher` so it does not compete with the published PR-head
-check. The [ruleset snapshot](./ruleset-main.json) records the live
-configuration; it does not apply settings to GitHub.
+check. The [ruleset snapshot](./ruleset-main.json) declares the intended
+configuration; it does not apply settings to GitHub. A policy change is
+active only after live settings are applied and independently read back.
 The publisher runs trusted default-branch code without a PR checkout.
 A read-only review observer triggers it for review changes, including
 forks. Manual refresh, migration and post-merge proof are covered in the
