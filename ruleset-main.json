@@ -51,6 +51,22 @@
           },
           {
             "context": "typecheck"
+          },
+          {
+            "context": "semgrep",
+            "integration_id": 15368
+          },
+          {
+            "context": "gitleaks",
+            "integration_id": 15368
+          },
+          {
+            "context": "dependency-review",
+            "integration_id": 15368
+          },
+          {
+            "context": "dependency-audit",
+            "integration_id": 15368
           }
         ],
         "do_not_enforce_on_create": false
