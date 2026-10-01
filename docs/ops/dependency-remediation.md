@@ -20,8 +20,12 @@ Nx's TypeScript sync removes redundant dependency references from six
 solution configs; their library configs retain the actual build references.
 
 Verdaccio moves to `6.10.4`, retiring the old Cypress request/UUID path.
-ESLint and `@eslint/js` stay aligned on the fixed 9.x maintenance version
-`9.39.5`, removing the vulnerable older plugin-kit dependency.
+ESLint `10.11.0` and its `@eslint/js@10.0.1` configuration package remove
+the vulnerable older plugin-kit dependency and use the
+[current supported major](https://eslint.org/version-support/). Nx and
+typescript-eslint explicitly support ESLint 10. The workspace Node range
+is `^22.13.0 || >=24.0.0`, matching the
+[ESLint 10 runtime floor](https://eslint.org/docs/latest/use/migrate-to-10.0.0).
 
 Both Worker packages pin Wrangler `4.116.0` and its compatible Workers types
 `5.20260730.1`. This Wrangler version uses stable Miniflare 4 and already

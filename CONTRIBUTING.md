@@ -38,7 +38,8 @@ Please read:
 
 ## Development workflow
 
-Requires Node 22+ and the pinned pnpm 10.34.6 via Corepack.
+Requires Node 22.13+ in the 22.x line or Node 24+, and the pinned pnpm
+10.34.6 via Corepack.
 See [dependency policy](docs/ops/security-scans.md#dependency-policy) for install controls.
 
 ```sh
