@@ -1,0 +1,19 @@
+name: quorum-review-events
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+# Fork/Dependabot reviews have read-only tokens. This observer never
+# publishes checks; the default-branch workflow_run publisher reads the
+# live GitHub discussion without consuming observer code or artifacts.
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Notify trusted quorum publisher
+        run: echo "Review event received. The trusted publisher refreshes live evidence."

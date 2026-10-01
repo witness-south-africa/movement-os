@@ -30,7 +30,7 @@ same work:
 
 These four roles are the **role contract**. The role contract is what
 this ADR governs. The specific label strings used to claim a role on a
-PR (see "Role contract and v1 label protocol" below) are a separate,
+PR (see "Role contract and label protocol" below) are a separate,
 narrower concern.
 
 This creates a durable audit trail and improves decision quality, but it
@@ -55,72 +55,39 @@ Witness South Africa adopts the following operational security model:
 5. Hardening work will proceed in ranked order, with identity separation
    before stricter merge governance.
 
-## Role contract and v1 label protocol
+## Role contract and label protocol
 
-The four roles above are conceptual. Each role can, in principle, be
-claimed by any agreed-upon signal on the PR: a comment prefix, a review
-body, a check run, a trailer line. The specific signals the repository
-accepts today are a **v1 label protocol** layered on top of that
-contract.
+The four conceptual roles remain unchanged. The current labels are:
 
-### Current v1 labels
+| Role                      | Label                      | Enforcement                |
+| ------------------------- | -------------------------- | -------------------------- |
+| author / worker           | `Agent WS1` or `Agent WS2` | Required by `quorum-audit` |
+| reviewer / critic         | `Agent R3`                 | Required by `quorum-audit` |
+| controller / orchestrator | `Agent Controller`         | Required by `quorum-audit` |
+| lifecycle / verifier      | `Agent L1`                 | Procedural; not automated  |
 
-| Role (contract)              | Current label prefix on PR issue comments or review bodies | Enforcement today                 |
-|------------------------------|------------------------------------------------------------|-----------------------------------|
-| author / worker              | `Agent WS1` or `Agent WS2`                                 | Required by `quorum-audit.yml`    |
-| reviewer / critic            | `Agent R3`                                                 | Required by `quorum-audit.yml`    |
-| controller / orchestrator    | `Agent BOSS`                                               | Required by `quorum-audit.yml`    |
-| lifecycle / verifier         | `Agent L1` (intended)                                      | **Not yet enforced** — see TODO in workflow |
+Controller replaces the previous controller label for new work. The
+parser retains `Agent BOSS` as a legacy alias so existing attestations
+remain usable during migration. Removing that alias requires a separate
+compatibility assessment of in-flight PRs.
 
-The exact regexes live in `.github/workflows/quorum-audit.yml`. The
-workflow scans two sources for each PR: the list of PR issue comments,
-and the list of PR reviews (excluding reviews in `DISMISSED` state).
-The signature formats currently parsed are, for the head SHA of the
-PR:
+The [operator protocol](../ops/agent-protocol.md#quorum-attestations)
+defines the accepted signature forms and review-state semantics. The
+workflow reads all comment and review pages, and accepts review bodies
+only in `COMMENTED` or `APPROVED` state on the current PR head commit.
+Editing or deleting an issue comment, or editing/dismissing a review,
+triggers a fresh evaluation. Later changes-requested reviews invalidate
+older review signatures from that account on the same head. Signers need
+current write, maintain or admin access; role labels still do not prove
+distinct identities.
 
-- `Agent WS1 ... <sha>` or `Agent WS2 ... <sha>` (author)
-- `Agent R3: no findings on <sha>` or `Agent R3: concur at <sha>` (reviewer)
-- `Agent BOSS: concur at <sha>` (controller)
-
-Review-state semantics: reviews in `DISMISSED` state are excluded
-entirely. Their bodies are not examined for any role, including
-author (`Agent WS1` / `Agent WS2`) attestations that happen to have
-been left inside a review body. Issue comments have no dismissal
-state, so every issue comment on the PR is considered. To retract an
-attestation posted as a review, dismiss that review (or leave a
-superseding attestation on the new head SHA).
-
-### What is arbitrary, what is not
-
-- **Arbitrary (conceptually):** the literal strings `WS1`, `WS2`, `R3`,
-  `BOSS`, `L1`. They are project-specific names, not load-bearing
-  identifiers. A future protocol version could rename them without
-  changing the contract.
-- **Not arbitrary (operationally):** those exact strings are what
-  `quorum-audit.yml` currently grep-parses on PR comments and reviews.
-  Until the workflow is updated in lockstep, changing the labels on a
-  PR will cause the audit to fail to detect the quorum.
-
-### Changing labels later
-
-Renaming or extending the label protocol is allowed, but it is a
-coordinated change:
-
-1. Update `.github/workflows/quorum-audit.yml` regexes.
-2. Update this ADR's table.
-3. Update the README governance section's glossary.
-4. Update any in-flight PR templates or runbooks that cite the old
-   labels.
-5. Run through one full PR with the new labels before promoting
-   `quorum-audit.yml` to a required check.
-
-Until that coordinated change ships, contributors and agents must use
-the v1 labels above verbatim.
+Label changes must update the workflow, ADR, README and operator
+references together, with validation for new and retained legacy forms.
 
 ### Governance roles vs runtime agents
 
 The labels in this section are **governance roles**: they describe who
-attests to what on a PR. They are *not* the same as the **runtime
+attests to what on a PR. They are _not_ the same as the **runtime
 agents** shipped under `packages/` (for example, `@wsa/agent-openai`,
 `@wsa/agent-xai`, `@wsa/agent-contracts`). Runtime agents are product
 code that calls LLMs to process evidence; governance roles are PR-time
@@ -136,10 +103,25 @@ The repository will support this model with two in-repo artefacts:
   reviewer, and controller signatures exist on the current PR head SHA
   on both PR-synchronize events and later PR discussion events
 
-On v1, `quorum-audit.yml` is report-only. It proves the ceremony is
-happening without yet becoming a required status check. Promotion to a
-required check is a later hardening step after two clean runs on
-separate PRs.
+The live `main-protection` ruleset now requires `quorum-audit` alongside
+`lint`, `typecheck`, `test` and `build`. The checked-in `ruleset-main.json`
+is a snapshot of the live configuration, not a deployment mechanism.
+
+The workflow's runner job is `quorum-publisher`; its managed PR-head
+check is `quorum-audit`. Those names differ to prevent conflicting job
+and published-check results. Publication is serialized for a PR, and the
+managed check is moved to `in_progress` before reading attestations.
+The result is failure for missing signatures, a head change or an API
+error. Publication errors fail visibly and can leave the check pending.
+An error before creating or updating the check provides no fresh quorum
+proof; inspect the publisher failure rather than relying on an old result.
+
+The publisher runs trusted default-branch code on PR-target, comment and
+review-observer completion events. It does not check out PR code or read
+observer artifacts. The review observer has a read-only token, including
+for forks and Dependabot. Check timestamps and the publisher link refresh
+on every evaluation. Offline regression tests exercise the actual workflow
+shell with a simulated GitHub API.
 
 ## Ranked hardening plan
 
@@ -149,11 +131,12 @@ The hardening order is:
 2. Introduce a scoped CI automation identity using a GitHub App instead
    of a broad personal token.
 3. Promote `quorum-audit.yml` to a required status check after two clean
-   runs.
+   runs. **Completed in the live ruleset; tracked by #22.**
 4. Add CODEOWNERS-required review once a second write-capable
    collaborator exists.
 5. Tighten branch protection further by restricting merge methods to
-   squash-only and requiring linear history.
+   squash-only and requiring linear history. **Completed in the live
+   ruleset.**
 
 This order is deliberate:
 
@@ -170,8 +153,8 @@ This ADR is considered landed when all of the following are true:
 1. A PR can show parseable author, reviewer, and controller role
    signatures on the exact current head SHA.
 2. `CODEOWNERS` exists in the repository root.
-3. `quorum-audit.yml` executes on `pull_request`, PR-review, and
-   PR-comment events.
+3. `quorum-audit.yml` executes on trusted `pull_request_target`,
+   PR-comment and review-observer completion events.
 4. A tracking issue exists for the ranked hardening plan.
 
 ## Non-goals
@@ -186,22 +169,18 @@ This ADR does not:
 
 ## Rollout
 
-Rollout happens in two phases:
+The original rollout began with report-only auditing, followed by
+promotion after two clean PR runs. The live ruleset is now in the
+enforced phase. Required human approvals and CODEOWNERS enforcement
+remain deferred until a second write-capable collaborator exists.
 
-### Phase 1: report-only
-
-- add `CODEOWNERS`
-- add `quorum-audit.yml`
-- run `quorum-audit.yml` as report-only on PR open/update and on later
-  quorum discussion events (issue comments and review submissions)
-- publish the report-only `quorum-audit` result against the PR head SHA so
-  discussion-triggered verification is visible on the PR surface
-- observe two clean PR runs
-
-### Phase 2: enforced
-
-- promote `quorum-audit.yml` to a required status check
-- keep required approvals deferred until a second collaborator exists
+This follow-up preserves the required check name while separating its
+publisher job, making errors visible, and introducing Controller with
+legacy compatibility. Existing workflow-job checks on old PR heads are
+historical records; their reconciliation must be verified on the actual
+PR surface, rather than assuming a publisher fix clears them.
+The [operator protocol](../ops/agent-protocol.md#merge-and-post-merge-verification)
+defines candidate-branch bootstrap, manual recovery and post-merge proof.
 
 ## Consequences
 
