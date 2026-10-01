@@ -117,8 +117,9 @@ runner job and can leave the managed check pending. Errors before that
 check can be created or updated require inspection of the publisher;
 no fresh verification exists in that case.
 
-Every evaluation refreshes the check's start/completion times and links to
-its publisher run. Its summary records run ID/attempt, event and workflow
+Every evaluation refreshes the check's start/completion times and includes
+a publisher link in its summary; GitHub can override the check details URL.
+The summary records run ID/attempt, event and workflow
 source revision as well as the evaluated PR head. A relay that is missing,
 disabled or altered provides no fresh review-event verification: inspect
 the observer and publisher, then use the trusted manual refresh below.
@@ -146,7 +147,9 @@ checks. Older unmanaged checks are preserved and require actual readback.
 After squash, verify the merge commit and landed tree on `main`, successful
 main CI, and unchanged protection. Post a verification comment on the
 merged PR to exercise the new default-branch publisher against its original
-PR head. Verify check reuse, refreshed provenance and success. A merged
+PR head. Also edit a commit-bound review without changing its signature,
+then verify the read-only observer triggers a successful trusted publisher.
+Verify check reuse, refreshed provenance and success. A merged
 PR can be audited for rollout proof; a closed unmerged PR is ignored.
 This governance slice does not require a product deployment.
 

@@ -55,7 +55,7 @@ jobs:
             if [[ "$prs" == '[]' ]]; then
               prs="$(gh api --paginate --slurp \
                 "repos/${GITHUB_REPOSITORY}/commits/${source_head}/pulls?per_page=100" |
-                jq -c '[.[][] | select(.state == "open" and .base.ref == "main") | .number] | unique')"
+                jq -c '[.[][] | select((.state == "open" or .merged_at != null) and .base.ref == "main") | .number] | unique')"
             fi
           else
             [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
@@ -99,7 +99,7 @@ jobs:
             trap - ERR
             echo "::error::Quorum evaluation or publication failed."
             if [[ -n "$check_id" ]]; then
-              payload="$(jq -n --arg completed "$(date -u +%FT%TZ)" --arg url "$run_url" '{status: "completed", conclusion: "failure", completed_at: $completed, details_url: $url, output: {title: "Quorum audit could not complete", summary: "An API or evaluation error prevented verification. No quorum is certified."}}')"
+              payload="$(jq -n --arg completed "$(date -u +%FT%TZ)" --arg url "$run_url" '{status: "completed", conclusion: "failure", completed_at: $completed, details_url: $url, output: {title: "Quorum audit could not complete", summary: ("An API or evaluation error prevented verification. No quorum is certified.\n\n[Publisher run](" + $url + ")")}}')"
               if ! gh api "repos/${GITHUB_REPOSITORY}/check-runs/${check_id}" \
                 -X PATCH --input - <<<"$payload" >/dev/null; then
                 echo "::error::Could not finalize the PR-head check; inspect the pending check and publisher failure."
@@ -208,8 +208,8 @@ jobs:
             conclusion="failure"
             title="PR head changed during quorum audit"
           fi
-          summary="$(printf 'author=%s\nreviewer=%s\ncontroller=%s\nhead=%s\ncurrent_head=%s\nissue_comments_scanned=%s\nreviews_scanned=%s\neligible_signers=%s\nrun_id=%s\nrun_attempt=%s\nevent=%s\nsource_revision=%s\nlifecycle=not-enforced' \
-            "$author_found" "$reviewer_found" "$controller_found" "$pr_head_sha" "$current_head_sha" "$issue_comments_scanned" "$reviews_scanned" "$eligible_logins" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_EVENT_NAME" "$GITHUB_SHA")"
+          summary="$(printf 'author=%s\nreviewer=%s\ncontroller=%s\nhead=%s\ncurrent_head=%s\nissue_comments_scanned=%s\nreviews_scanned=%s\neligible_signers=%s\nrun_id=%s\nrun_attempt=%s\nevent=%s\nsource_revision=%s\nlifecycle=not-enforced\n\n[Publisher run](%s)' \
+            "$author_found" "$reviewer_found" "$controller_found" "$pr_head_sha" "$current_head_sha" "$issue_comments_scanned" "$reviews_scanned" "$eligible_logins" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_EVENT_NAME" "$GITHUB_SHA" "$run_url")"
           payload="$(jq -n --arg conclusion "$conclusion" --arg title "$title" --arg summary "$summary" --arg completed "$(date -u +%FT%TZ)" --arg url "$run_url" \
             '{status: "completed", conclusion: $conclusion, completed_at: $completed, details_url: $url, output: {title: $title, summary: $summary}}')"
           gh api "repos/${GITHUB_REPOSITORY}/check-runs/${check_id}" \

@@ -305,6 +305,7 @@ class QuorumAuditTest(unittest.TestCase):
         self.assertNotEqual(check["started_at"], "2000-01-01T00:00:00Z")
         self.assertNotEqual(check["completed_at"], "2000-01-01T00:00:01Z")
         self.assertIn("run_attempt=2", check["output"]["summary"])
+        self.assertIn("[Publisher run](https://github.com/test/repo/actions/runs/456)", check["output"]["summary"])
         self.assertIn(f"source_revision={OLD_HEAD}", check["output"]["summary"])
 
     def test_unmanaged_legacy_check_is_preserved(self):
@@ -320,6 +321,7 @@ class QuorumAuditTest(unittest.TestCase):
                 result, state = self.run_audit(checks=[self.existing_check()], **{failure: True})
                 self.assert_conclusion(result, state, "failure")
                 self.assertEqual(state["checks"][0]["output"]["title"], "Quorum audit could not complete")
+                self.assertIn("[Publisher run](https://github.com/test/repo/actions/runs/456)", state["checks"][0]["output"]["summary"])
 
     def test_publish_failure_is_visible_and_keeps_check_pending(self):
         result, state = self.run_audit(fail_publish=True)
@@ -381,6 +383,14 @@ class QuorumAuditTest(unittest.TestCase):
                     event=event, step="Resolve review event without consuming PR artifacts")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(state.get("checks"))
+
+    def test_observer_fallback_can_resolve_merged_rollout_pr(self):
+        result, state = self.run_audit(audit_env={"GITHUB_EVENT_NAME": "workflow_run"},
+            event=self.observer_event([]), step="Resolve review event without consuming PR artifacts",
+            associated_prs=[[{"number": 22, "state": "closed", "merged_at": "2026-10-01T07:00:00Z",
+                             "base": {"ref": "main"}}]])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("prs=[22]", state["outputs"])
 
 
 if __name__ == "__main__":

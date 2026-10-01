@@ -153,8 +153,8 @@ This ADR is considered landed when all of the following are true:
 1. A PR can show parseable author, reviewer, and controller role
    signatures on the exact current head SHA.
 2. `CODEOWNERS` exists in the repository root.
-3. `quorum-audit.yml` executes on `pull_request`, PR-review, and
-   PR-comment events.
+3. `quorum-audit.yml` executes on trusted `pull_request_target`,
+   PR-comment and review-observer completion events.
 4. A tracking issue exists for the ranked hardening plan.
 
 ## Non-goals
