@@ -59,6 +59,9 @@ limited to dependencies that their selected parents still constrain:
 - Miniflare `4.20260730.0`: sharp `0.35.4` and Undici `7.29.1`, within
   the existing 0.35 and 7 major lines.
 - Verdaccio config `8.3.0`: js-yaml `5.4.2`, fixing the selected 5.x line.
+- Node typings `22.20.4`: Undici typings `6.28.1`, reviewed as described below.
+- Jest worker `30.3.0`: structured-clone `1.4.0`, within its `^1.3.0` range,
+  retiring the deprecated `1.3.0` deserialization path.
 
 The parent-specific Lodash `4.18.1` override from #33 remains present.
 No advisory, severity or scanner rule is suppressed. All retained package
@@ -96,6 +99,67 @@ there is no package-wide exclusion or age-based trust bypass. Independent
 real pnpm fixtures prove that the Semver exception permits only `6.3.1`
 and still rejects `5.7.2`.
 
+## Node 22 typings and fresh registry checks
+
+Post-merge verification of #41 found another historical trust gap in the
+retained `@types/node@22.10.10` → `undici-types@6.20.0` path. The bounded
+Nx `22.7.12` update passed with cached registry metadata but failed when
+using a new pnpm store. Frozen installation and cached resolution did not
+establish that a fresh updater could resolve this path.
+
+Pin Node 22 typings to mature `22.20.4`, published on 2026-09-19. Its
+declared `~6.21.0` Undici typings range has only the unprovenanced `6.21.0`
+release. The exact parent-qualified override selects `undici-types@6.28.1`,
+published on 2026-09-04 with
+[upstream release provenance](https://registry.npmjs.org/-/npm/v1/attestations/undici-types@6.28.1).
+This deliberately exceeds the parent's minor range while retaining the
+Undici 6 typing API and the Node 22 runtime contract. No third trust
+exception is added; the packages have no installation lifecycle scripts.
+
+The reviewed tarball SHA512 is
+`sha512-8sc9COfigHECtZwvbJdkTu3zy+U4HHmJVceTSl8T+RSWBCupR+6SGzWf+hUoklc3DxBUBzGbTQzYBFLpafwLOw==`.
+Its provenance subject matches the tarball digest and identifies upstream
+commit `ffc8aa0fdd4c54024f384e57784d5047c8b4085a`. Comparing Undici typings
+`6.21.0` with `6.28.1` leaves the Fetch and WebSocket declarations unchanged.
+Other changes include a retry callback return type change, so compatibility
+is established by checking the actual Node-facing APIs rather than assuming
+every change is additive. Independent TypeScript `5.6.3` validation uses
+`strict`, `skipLibCheck: false` and ES2022 without DOM declarations, checking
+the full Node declarations plus Fetch, Request/Response, Headers, FormData,
+AbortSignal, WebSocket and MessageEvent. Workspace checks remain required.
+
+Remove the override when a compatible Node 22 typings parent selects a
+normally trusted Undici typings version itself. New versions require a
+fresh compatibility and provenance review.
+
+In an isolated proof checkout, use a new store to avoid retained registry
+metadata when verifying the bounded updater command:
+
+```sh
+dependency_policy_store=$(mktemp -d)
+corepack pnpm update nx@22.7.12 --lockfile-only --no-save -r \
+  --config.minimumReleaseAge=0 --store-dir "$dependency_policy_store"
+```
+
+Also verify normal resolution with the seven-day policy. Inspect the
+resulting lockfile and preserve its integrity hashes; a command exit code
+alone does not establish the intended update result.
+
+The same fresh metadata review exposed the maintainer's security
+deprecation of retained `@ungap/structured-clone@1.3.0`. Jest worker
+`30.3.0` uses its deserializer for IPC fallback. The upstream
+[constructor guard](https://github.com/ungap/structured-clone/commit/d4e42f861afbf879fa0b6e87f41e991f73ddeb1a)
+released in `1.3.1` rejects dangerous Function, Worker, eval and timer
+constructors. An exact parent-qualified override reuses mature `1.4.0`,
+already selected by the newer Jest worker path, within the older parent's
+declared range. No new trust or script allowance is required. Remove this
+override when upgrading that parent naturally retires its old resolution.
+The registry audit reports zero advisories, but that does not invalidate
+the upstream security warning or establish complete advisory coverage.
+The required dependency smoke check resolves the actual Jest worker IPC
+dependency, verifies an ordinary data round-trip and requires it to reject
+a serialized Function constructor.
+
 ## Native scripts and validation
 
 The exact script allowances cover SWC `1.16.2`, esbuild `0.28.1`, Nx
@@ -132,3 +196,9 @@ Frozen installs preserve the reviewed lockfile and do not re-audit age or
 trust. A green CI install alone therefore does not prove the updater route
 is repaired. Post-merge acceptance must inspect the actual updater job and
 its default-branch revision as well as main CI, scans and alert convergence.
+An official CLI replay must preserve the job's `command: security` field.
+An exit code of zero or `mark_as_processed` callback can coexist with
+handled update failures; inspect the candidate commands and generated
+results. Retaining an old explicit target list after its alerts are fixed
+can also select newer major versions, which requires a separate review
+before adopting those generated candidates.
