@@ -88,6 +88,11 @@ Use a short synthetic Lane-2 envelope containing no witness data. Supply
 helper prints status, known reason, response digest and structural flags;
 it never prints request/response text or headers. Run from the repo root:
 
+Signed proof requires a valid input request ID, an equal returned request ID
+and complete claim/promotion/evidence fields. Attribution checks inspect
+decoded JSON, including escaped strings. The emitted request-ID digest joins
+the corresponding telemetry projection without publishing its raw ID.
+
 ```sh
 python3 -B scripts/extract_probe.py --url "$EXTRACT_PROOF_URL" --mode unsigned
 python3 -B scripts/extract_probe.py --url "$EXTRACT_PROOF_URL" --mode tampered --envelope /tmp/extract-api-proof/envelope.json

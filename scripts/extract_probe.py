@@ -20,7 +20,39 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def nonempty_string(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def complete_claim(item):
+    if not isinstance(item, dict):
+        return False
+    claim, evidence, promotion = (item.get(name) for name in ('claim', 'evidencePreview', 'promotionDecision'))
+    if not all(isinstance(value, dict) for value in (claim, evidence, promotion)):
+        return False
+    statuses = {'conclusive', 'high-confidence', 'contested', 'insufficient-record', 'destroyed-or-missing-record-suspected'}
+    source = claim.get('sourceRef')
+    reasons = promotion.get('reasons')
+    return (item.get('requestedStatus') in statuses
+            and item.get('effectiveStatus') in statuses
+            and claim.get('status') == item['effectiveStatus']
+            and all(nonempty_string(claim.get(name)) for name in ('id', 'text'))
+            and isinstance(source, dict) and source.get('kind') in {'artefact', 'intake'}
+            and nonempty_string(source.get('id'))
+            and all(nonempty_string(evidence.get(name)) for name in ('id', 'kind', 'url', 'fetchedAt', 'sha256', 'supports'))
+            and re.fullmatch(r'[a-fA-F0-9]{64}', evidence['sha256']) is not None
+            and isinstance(promotion.get('ok'), bool)
+            and isinstance(reasons, list)
+            and all(isinstance(reason, dict) and nonempty_string(reason.get('code'))
+                    and nonempty_string(reason.get('severity')) for reason in reasons))
+
+
 def capture(url, mode, body=b'{}', key_id=None, secret=None):
+    envelope = json.loads(body)
+    extract = envelope.get('extract') if isinstance(envelope, dict) else None
+    request_id = extract.get('requestId') if isinstance(extract, dict) else None
+    if mode != 'unsigned' and not nonempty_string(request_id):
+        raise ValueError('valid extract.requestId required before sending')
     headers = {'Content-Type': 'application/json'}
     if mode != 'unsigned':
         if not key_id or not secret:
@@ -50,23 +82,26 @@ def capture(url, mode, body=b'{}', key_id=None, secret=None):
     promotion_present = bool(claims) and all(
         isinstance(claim, dict) and isinstance(claim.get('promotionDecision'), dict)
         and isinstance(claim['promotionDecision'].get('ok'), bool) for claim in claims)
+    claim_shape_complete = bool(claims) and all(complete_claim(claim) for claim in claims)
+    response_id_matches = isinstance(payload, dict) and nonempty_string(request_id) and payload.get('requestId') == request_id
     reason = payload.get('reason') if isinstance(payload, dict) else None
     # Only known response categories may leave the private response boundary.
     safe_reason = reason if reason in {'missing_signature_headers', 'signature_mismatch',
                                       'body_hash_mismatch', 'stale_timestamp', 'unknown_key_id',
                                       'budget_exhausted', 'rate_limited', 'internal_error'} else None
-    no_attribution = re.search(r'grok|xai|x\.ai', raw.decode('utf-8'), re.IGNORECASE) is None
+    no_attribution = re.search(r'grok|xai|x\.ai', json.dumps(payload, ensure_ascii=False), re.IGNORECASE) is None
     summary_present = isinstance(payload, dict) and isinstance(payload.get('summary'), str) and bool(payload['summary'].strip())
     auth_reasons = {'missing_signature_headers', 'signature_mismatch', 'body_hash_mismatch', 'stale_timestamp', 'unknown_key_id'}
-    accepted = no_attribution and ((mode == 'signed' and status == 200 and promotion_present and summary_present)
+    accepted = no_attribution and ((mode == 'signed' and status == 200 and promotion_present and claim_shape_complete and response_id_matches and summary_present)
                 or (mode in {'unsigned', 'tampered'} and status == 401 and safe_reason in auth_reasons)
                 or (mode == 'budget' and status == 429 and safe_reason == 'budget_exhausted'))
-    request_id = json.loads(body).get('extract', {}).get('requestId')
     return {'capturedAtUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'mode': mode, 'status': status, 'reason': safe_reason,
             'requestIdSha256': hashlib.sha256(request_id.encode()).hexdigest() if isinstance(request_id, str) else None,
             'responseSha256': hashlib.sha256(raw).hexdigest(),
             'summaryPresent': summary_present,
+            'responseRequestIdMatches': response_id_matches,
+            'claimShapeComplete': claim_shape_complete,
             'claimCount': len(claims), 'promotionPresent': promotion_present,
             'noProviderAttribution': no_attribution, 'accepted': accepted}
 

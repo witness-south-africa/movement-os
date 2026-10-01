@@ -14,9 +14,19 @@ class FakeResponse(io.BytesIO):
 
 
 class ProbeTests(unittest.TestCase):
+    def signed_body(self):
+        return b'{"extract":{"requestId":"probe-001"}, "sourceText":"private synthetic body"}'
+
+    def response_body(self):
+        return {'requestId': 'probe-001', 'summary': 'private output', 'claims': [{
+            'requestedStatus': 'contested', 'effectiveStatus': 'contested',
+            'claim': {'id': 'claim-id', 'text': 'private claim', 'status': 'contested', 'sourceRef': {'kind': 'artefact', 'id': 'source-id'}},
+            'evidencePreview': {'id': 'evidence-id', 'kind': 'other', 'url': 'https://example.org/source', 'fetchedAt': '2026-10-01T08:00:00Z', 'sha256': 'a' * 64, 'supports': 'supports'},
+            'promotionDecision': {'ok': True, 'reasons': []}}]}
+
     def test_signed_probe_preserves_raw_path_and_emits_only_structural_evidence(self):
-        body = b'{"sourceText":"private synthetic body"}'
-        response = {'summary': 'private output', 'claims': [{'text': 'private claim', 'promotionDecision': {'ok': True}}]}
+        body = self.signed_body()
+        response = self.response_body()
         raw = json.dumps(response).encode()
         with patch('extract_probe.time.time', return_value=123), patch('extract_probe.urllib.request.OpenerDirector.open', return_value=FakeResponse(raw)) as send:
             result = extract_probe.capture('https://operator.invalid/v1/extract?source=%2Fdoc', 'signed', body, 'OPS-01', 'test-secret')
@@ -29,10 +39,49 @@ class ProbeTests(unittest.TestCase):
         self.assertNotIn('test-secret', json.dumps(result))
 
     def test_provider_attribution_prevents_acceptance(self):
-        with patch('extract_probe.urllib.request.OpenerDirector.open', return_value=FakeResponse(b'{"summary":"Grok", "claims":[{"promotionDecision":{"ok":true}}]}')):
-            result = extract_probe.capture('https://operator.invalid/v1/extract', 'signed', b'{}', 'OP01', 'test-secret')
+        response = self.response_body()
+        response['summary'] = 'Grok'
+        with patch('extract_probe.urllib.request.OpenerDirector.open', return_value=FakeResponse(json.dumps(response).encode())):
+            result = extract_probe.capture('https://operator.invalid/v1/extract', 'signed', self.signed_body(), 'OP01', 'test-secret')
         self.assertFalse(result['accepted'])
         self.assertFalse(result['noProviderAttribution'])
+
+    def test_escaped_provider_attribution_is_detected_after_json_decoding(self):
+        response = self.response_body()
+        raw = json.dumps(response).replace('private output', r'\u0078\u0061\u0069').encode()
+        with patch('extract_probe.urllib.request.OpenerDirector.open', return_value=FakeResponse(raw)):
+            result = extract_probe.capture('https://operator.invalid/v1/extract', 'signed', self.signed_body(), 'OP01', 'test-secret')
+        self.assertFalse(result['accepted'])
+        self.assertFalse(result['noProviderAttribution'])
+
+    def test_response_must_match_request_and_include_complete_claim_structure(self):
+        for missing in ('claim', 'evidencePreview', 'requestedStatus', 'effectiveStatus', 'promotionDecision'):
+            with self.subTest(missing=missing):
+                response = self.response_body()
+                del response['claims'][0][missing]
+                with patch('extract_probe.urllib.request.OpenerDirector.open', return_value=FakeResponse(json.dumps(response).encode())):
+                    result = extract_probe.capture('https://operator.invalid/v1/extract', 'signed', self.signed_body(), 'OP01', 'test-secret')
+                self.assertFalse(result['accepted'])
+        response = self.response_body()
+        response['requestId'] = 'different-request'
+        with patch('extract_probe.urllib.request.OpenerDirector.open', return_value=FakeResponse(json.dumps(response).encode())):
+            result = extract_probe.capture('https://operator.invalid/v1/extract', 'signed', self.signed_body(), 'OP01', 'test-secret')
+        self.assertFalse(result['accepted'])
+        self.assertFalse(result['responseRequestIdMatches'])
+
+    def test_invalid_request_ids_are_rejected_before_network(self):
+        with patch('extract_probe.urllib.request.OpenerDirector.open') as send:
+            for body in (b'{}', b'[]', b'{"extract":{}}', b'{"extract":{"requestId":" "}}', b'{"extract":{"requestId":1}}'):
+                with self.subTest(body=body), self.assertRaises(ValueError):
+                    extract_probe.capture('https://operator.invalid/v1/extract', 'signed', body, 'OP01', 'test-secret')
+        send.assert_not_called()
+
+    def test_budget_http_error_response_is_captured_without_body_leakage(self):
+        error = extract_probe.urllib.error.HTTPError('https://operator.invalid', 429, 'private error', {}, io.BytesIO(b'{"reason":"budget_exhausted"}'))
+        with patch('extract_probe.urllib.request.OpenerDirector.open', side_effect=error):
+            result = extract_probe.capture('https://operator.invalid/v1/extract', 'budget', self.signed_body(), 'OP01', 'test-secret')
+        self.assertTrue(result['accepted'])
+        self.assertNotIn('private error', json.dumps(result))
 
     def test_unknown_reason_cannot_leak_into_evidence(self):
         response = FakeResponse(b'{"reason":"private-secret"}')
