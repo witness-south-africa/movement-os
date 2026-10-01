@@ -149,7 +149,33 @@ describe('@wsa/extract-api-worker/auth', () => {
       NOW,
     );
 
-    expect(result.keyId).toBe('OPS-01');
+    expect(result.keyId).toBe('OPS_01');
+  });
+
+  it.each(['OPS-01', 'OPS+01', 'OPS_01'])(
+    'returns one credential identity for %s',
+    async (keyId) => {
+      const result = await verifySignedRequest(
+        buildSignedRequest({ body: '{}', keyId }),
+        { OPERATOR_HMAC_KEY_OPS_01: 'top-secret' },
+        NOW,
+      );
+      expect(result.keyId).toBe('OPS_01');
+    },
+  );
+
+  it.each([
+    `${CURRENT_TIMESTAMP}junk`,
+    `${CURRENT_TIMESTAMP}.5`,
+    '9007199254740993',
+  ])('rejects non-integer or unsafe timestamp %s', async (timestamp) => {
+    await expect(
+      verifySignedRequest(
+        buildSignedRequest({ body: '{}', timestamp }),
+        { OPERATOR_HMAC_KEY_OP01: 'top-secret' },
+        NOW,
+      ),
+    ).rejects.toMatchObject({ reason: 'stale_timestamp' });
   });
 
   it('rejects invalid timestamp headers', async () => {

@@ -188,7 +188,7 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
       totalTokens: 0,
     });
     expect(telemetryWrites[0]?.record.requestId).toEqual(
-      expect.stringMatching(/^auth-[a-z0-9]+$/),
+      expect.stringMatching(/^auth-[a-f0-9-]{36}$/),
     );
     expect(telemetryWrites[0]?.record.sourceRef).toBeUndefined();
     expect(telemetryWrites[0]?.record.sourceSha256).toBeUndefined();

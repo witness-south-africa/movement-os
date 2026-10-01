@@ -65,7 +65,7 @@ export async function verifySignedRequest(
   }
 
   return {
-    keyId: headerValues.keyId,
+    keyId: canonicalKeyId(headerValues.keyId),
     timestamp: headerValues.timestamp,
     contentSha256: bodyHash,
     rawPathAndQuery,
@@ -151,8 +151,8 @@ function readSignatureHeaders(request: Request): {
 }
 
 function parseTimestamp(timestamp: string): number {
-  const parsed = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(parsed)) {
+  const parsed = Number(timestamp);
+  if (!/^\d+$/.test(timestamp) || !Number.isSafeInteger(parsed)) {
     throw new AuthError('stale_timestamp');
   }
   return parsed;
@@ -162,9 +162,12 @@ function readHmacSecret(
   env: SignatureSecretEnv,
   keyId: string,
 ): string | undefined {
-  const safeKeyId = keyId.replace(/[^A-Za-z0-9_]/g, '_');
-  const value = env[`${HMAC_KEY_PREFIX}${safeKeyId}`];
+  const value = env[`${HMAC_KEY_PREFIX}${canonicalKeyId(keyId)}`];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function canonicalKeyId(keyId: string): string {
+  return keyId.replace(/[^A-Za-z0-9_]/g, '_');
 }
 
 function constantTimeEqual(a: string, b: string): boolean {

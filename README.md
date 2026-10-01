@@ -15,8 +15,9 @@ under `docs/architecture/` and `.github/workflows/`, field protocols under
 `docs/field/`, and the public landing page served via GitHub Pages. Cloudflare
 Email Routing, a Cloudflare Email Worker, R2-backed mail preservation, Resend
 for outbound probes, and Infisical for secrets are all in active use. The
-private extract API worker is in the repo and tested, but it is not yet
-deployed to `extract-api.witnesssouthafrica.org`. The heavier graph datastore
+private extract API worker has a dated April 20 deployment proof bundle;
+adoption of the current source revision still needs version-linked runtime
+verification ([ADR-0007](./docs/architecture/0007-extract-api-surface.md)). The heavier graph datastore
 and retrieval stack described in ADR-0004 is still planned rather than shipped.
 
 ## Mission
@@ -67,7 +68,8 @@ This sentence is the platform's public API. It is pinned in
     source material into typed claims/evidence and immediately applies the
     promotion gate.
   - `@wsa/extract-api-worker` — private signed Cloudflare Worker surface for
-    Lane-2 evidence extraction per ADR-0007. Code shipped; deployment pending.
+    Lane-2 evidence extraction per ADR-0007. Historical deployment recorded;
+    current revision adoption requires fresh runtime proof.
   - `@wsa/guardrails` — deterministic publication and promotion gates,
     including ADR-0005 rules and ADR-0003's challenge-lane enforcement.
   - `@wsa/principles` — pinned mission/principles package and doctrine hash
@@ -107,8 +109,9 @@ working surfaces at this SHA:
 
 - The Postgres + Apache AGE + pgvector evidence graph stack described in
   ADR-0004.
-- Live deployment of `@wsa/extract-api-worker` to
-  `extract-api.witnesssouthafrica.org`.
+- Deployment and version-linked acceptance of the hardened
+  `@wsa/extract-api-worker` revision using the
+  [extract API runbook](./docs/ops/extract-api-runbook.md).
 - Anthropic and local provider adapters beyond the currently shipped
   packages.
 - Any future control-plane API or CLI surfaces, if and when they are actually
@@ -197,6 +200,7 @@ pnpm nx sync
 - [POPIA.md](./POPIA.md)
 - [docs/ops/dns-runbook.md](./docs/ops/dns-runbook.md)
 - [docs/ops/email-worker-runbook.md](./docs/ops/email-worker-runbook.md)
+- [docs/ops/extract-api-runbook.md](./docs/ops/extract-api-runbook.md)
 - [docs/ops/agent-protocol.md](./docs/ops/agent-protocol.md)
 - [docs/ops/agent-cheat-sheet.md](./docs/ops/agent-cheat-sheet.md)
 - [docs/ops/agent-prompts.md](./docs/ops/agent-prompts.md)
