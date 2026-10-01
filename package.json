@@ -27,7 +27,9 @@
       "miniflare@4.20260730.0>sharp": "0.35.4",
       "miniflare@4.20260730.0>undici": "7.29.1",
       "nx@22.7.12>smol-toml": "1.7.2",
-      "@verdaccio/config@8.3.0>js-yaml": "5.4.2"
+      "@verdaccio/config@8.3.0>js-yaml": "5.4.2",
+      "@types/node@22.20.4>undici-types": "6.28.1",
+      "jest-worker@30.3.0>@ungap/structured-clone": "1.4.0"
     }
   },
   "devDependencies": {
@@ -41,7 +43,7 @@
     "@swc/helpers": "~0.5.11",
     "@swc/jest": "~0.2.38",
     "@types/jest": "^30.0.0",
-    "@types/node": "~22.10.0",
+    "@types/node": "22.20.4",
     "eslint": "10.11.0",
     "jest": "^30.0.0",
     "jest-environment-node": "^30.0.2",

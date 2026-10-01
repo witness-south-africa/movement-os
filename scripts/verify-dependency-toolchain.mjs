@@ -8,6 +8,19 @@ const workerRequire = createRequire(
 const wranglerRequire = createRequire(workerRequire.resolve('wrangler'));
 const miniflareRequire = createRequire(wranglerRequire.resolve('miniflare'));
 
+// Exercise the deserializer used by Jest's worker IPC fallback. Ordinary
+// worker data must round-trip, while a serialized Function must be rejected.
+const jestRequire = createRequire(require.resolve('jest'));
+const jestCoreRequire = createRequire(jestRequire.resolve('@jest/core'));
+const jestRunnerRequire = createRequire(jestCoreRequire.resolve('jest-runner'));
+const jestWorkerRequire = createRequire(
+  jestRunnerRequire.resolve('jest-worker'),
+);
+const { serialize, deserialize } = jestWorkerRequire('@ungap/structured-clone');
+const workerData = { values: new Map([['answer', 42]]) };
+assert.deepEqual(deserialize(serialize(workerData)), workerData);
+assert.throws(() => deserialize([['Function', 'return 1;']]), TypeError);
+
 // Exercise the installed native compiler and bundler, rather than their metadata.
 const swc = require('@swc/core');
 assert.ok(swc.getBinaryMetadata().target, 'SWC must use its native binding');
@@ -67,5 +80,5 @@ try {
 }
 
 console.log(
-  'Dependency toolchain: native compilers, image transform and local HTTP passed',
+  'Dependency toolchain: safe worker IPC, native compilers, image transform and local HTTP passed',
 );
