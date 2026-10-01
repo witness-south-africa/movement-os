@@ -1,38 +1,97 @@
 name: quorum-audit
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
   issue_comment:
     types: [created, edited, deleted]
+  workflow_run:
+    workflows: [quorum-review-events]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request to refresh
+        required: true
+        type: string
+      expected_head:
+        description: Full current PR head SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
   checks: write
   pull-requests: read
 
-concurrency:
-  group: quorum-audit-pr-${{ github.event.pull_request.number || github.event.issue.number }}
-  # Finish publication before another run updates the same check.
-  cancel-in-progress: false
-
 jobs:
+  resolve-pr:
+    if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request != null }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      prs: ${{ steps.resolve.outputs.prs }}
+      source_head: ${{ steps.resolve.outputs.source_head }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+    steps:
+      - name: Resolve review event without consuming PR artifacts
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_head=""
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            jq -e --arg repo "$GITHUB_REPOSITORY" '
+              .workflow_run.event == "pull_request_review" and
+              .workflow_run.path == ".github/workflows/quorum-review-events.yml" and
+              .workflow_run.repository.full_name == $repo' "$GITHUB_EVENT_PATH" >/dev/null
+            source_head="$(jq -er '.workflow_run.head_sha | select(test("^[0-9a-f]{40}$"))' "$GITHUB_EVENT_PATH")"
+            prs="$(jq -c '[.workflow_run.pull_requests[]?.number] | unique' "$GITHUB_EVENT_PATH")"
+            if [[ "$prs" == '[]' ]]; then
+              prs="$(gh api --paginate --slurp \
+                "repos/${GITHUB_REPOSITORY}/commits/${source_head}/pulls?per_page=100" |
+                jq -c '[.[][] | select(.state == "open" and .base.ref == "main") | .number] | unique')"
+            fi
+          else
+            [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+            prs="[$PR_NUMBER]"
+          fi
+          jq -e 'length > 0 and all(.[]; type == "number" and . > 0 and . == floor)' <<<"$prs" >/dev/null
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+          echo "source_head=$source_head" >> "$GITHUB_OUTPUT"
+
   quorum-publisher:
     # This runner job must not share the required PR-head check's name.
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event.issue.pull_request != null }}
+    needs: resolve-pr
+    if: ${{ needs.resolve-pr.result == 'success' }}
+    name: quorum-publisher
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.resolve-pr.outputs.prs) }}
+    concurrency:
+      group: quorum-audit-pr-${{ matrix.pr }}
+      # Resolve fork events before choosing a key, so all event sources
+      # serialize publication for the same PR.
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
-      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+      PR_NUMBER: ${{ matrix.pr }}
+      SOURCE_HEAD: ${{ needs.resolve-pr.outputs.source_head }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
     steps:
       # No checkout: publishing never executes code from a PR's worktree.
       - name: Evaluate and publish current-head quorum
         shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
           check_id=""
           fail_audit() {
@@ -40,7 +99,7 @@ jobs:
             trap - ERR
             echo "::error::Quorum evaluation or publication failed."
             if [[ -n "$check_id" ]]; then
-              payload="$(jq -n '{status: "completed", conclusion: "failure", output: {title: "Quorum audit could not complete", summary: "An API or evaluation error prevented verification. No quorum is certified."}}')"
+              payload="$(jq -n --arg completed "$(date -u +%FT%TZ)" --arg url "$run_url" '{status: "completed", conclusion: "failure", completed_at: $completed, details_url: $url, output: {title: "Quorum audit could not complete", summary: "An API or evaluation error prevented verification. No quorum is certified."}}')"
               if ! gh api "repos/${GITHUB_REPOSITORY}/check-runs/${check_id}" \
                 -X PATCH --input - <<<"$payload" >/dev/null; then
                 echo "::error::Could not finalize the PR-head check; inspect the pending check and publisher failure."
@@ -50,9 +109,24 @@ jobs:
           }
           trap fail_audit ERR
 
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
           pr_path="repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
-          pr_head_sha="$(gh api "$pr_path" | jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))')"
+          pr_json="$(gh api "$pr_path")"
+          # Do not let delayed/closed events publish against a different PR.
+          if [[ "$(jq -r '.state' <<<"$pr_json")" != "open" && "$(jq -r '.merged' <<<"$pr_json")" != "true" ]]; then
+            echo "PR is closed without merging; no result published."
+            exit 0
+          fi
+          jq -e --arg repo "$GITHUB_REPOSITORY" '.base.ref == "main" and .base.repo.full_name == $repo' <<<"$pr_json" >/dev/null
+          pr_head_sha="$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' <<<"$pr_json")"
+          if [[ -n "$SOURCE_HEAD" && "$SOURCE_HEAD" != "$pr_head_sha" ]]; then
+            echo "Review event is for an older head; no current-head result published."
+            exit 0
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ && "$EXPECTED_HEAD" == "$pr_head_sha" ]]
+          fi
           external_id="quorum-audit:pr-${PR_NUMBER}:${pr_head_sha}"
 
           # Reuse our check for this PR/head. Invalidate an earlier success
@@ -65,8 +139,8 @@ jobs:
               | max_by(.id) | .id // empty'
           )"
           payload="$(
-            jq -n --arg sha "$pr_head_sha" --arg external_id "$external_id" \
-              '{name: "quorum-audit", head_sha: $sha, external_id: $external_id, status: "in_progress",
+            jq -n --arg sha "$pr_head_sha" --arg external_id "$external_id" --arg url "$run_url" --arg started "$(date -u +%FT%TZ)" \
+              '{name: "quorum-audit", head_sha: $sha, external_id: $external_id, status: "in_progress", started_at: $started, details_url: $url,
                 output: {title: "Quorum audit in progress", summary: "Refreshing signatures on the current PR head."}}'
           )"
           if [[ -n "$check_id" ]]; then
@@ -86,18 +160,38 @@ jobs:
           discussion_json="$(
             jq -n --arg sha "$pr_head_sha" \
               --argjson comments "$issue_comments_json" --argjson reviews "$reviews_json" '
-              [($comments[]?[]? | {body}),
-               ($reviews[]?[]? | select((.state == "APPROVED" or .state == "COMMENTED") and .commit_id == $sha) | {body})]'
+              [($comments[]?[]?),
+               ($reviews[]?[]? | select((.state == "APPROVED" or .state == "COMMENTED") and .commit_id == $sha)
+                | . as $review | select(any($reviews[]?[]?;
+                    .state == "CHANGES_REQUESTED" and .commit_id == $sha and
+                    .user.login == $review.user.login and
+                    ((.submitted_at // "") > ($review.submitted_at // "") or
+                     (.submitted_at == $review.submitted_at and .id > $review.id))) | not))]'
           )"
 
+          # Role contexts may share credentials, but public commenters must
+          # not manufacture quorum. Verify current access, not association.
+          eligible_logins='[]'
+          signer_logins="$(jq -r '[.[] | select(.user.type == "User") |
+            select((.body // "") | test("^Agent (WS[12]|R3|Controller|BOSS):")) | .user.login] | unique[]' <<<"$discussion_json")"
+          while read -r login; do
+            [[ -n "$login" ]] || continue
+            [[ "$login" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]]
+            permission="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${login}/permission" | jq -er '.permission')"
+            if [[ "$permission" == "write" || "$permission" == "maintain" || "$permission" == "admin" ]]; then
+              eligible_logins="$(jq --arg login "$login" '. + [$login]' <<<"$eligible_logins")"
+            fi
+          done <<<"$signer_logins"
+          discussion_json="$(jq --argjson eligible "$eligible_logins" '[.[] | select(.user.type == "User") | select(.user.login as $login | $eligible | index($login))]' <<<"$discussion_json")"
+
           author_found="$(jq -r --arg sha "$pr_head_sha" '
-            any(.[]; (.body // "") | test("^Agent WS[12]:[ \\t]+(authored at|implemented[^\\r\\n]* at) " + $sha + "\\b"; "m"))
+            any(.[]; (.body // "") | test("^Agent WS[12]:[ \\t]+(authored at|implemented and live-proved ADR-0007 extract-api deployment at) " + $sha + "\\.?[ \\t]*(\\r?\\n|$)"))
             ' <<<"$discussion_json")"
           reviewer_found="$(jq -r --arg sha "$pr_head_sha" '
-            any(.[]; (.body // "") | test("^Agent R3:[ \\t]+(no findings on|concur at) " + $sha + "\\b"; "m"))
+            any(.[]; (.body // "") | test("^Agent R3:[ \\t]+(no findings on|concur at) " + $sha + "\\.?[ \\t]*(\\r?\\n|$)"))
             ' <<<"$discussion_json")"
           controller_found="$(jq -r --arg sha "$pr_head_sha" '
-            any(.[]; (.body // "") | test("^Agent (Controller|BOSS):[ \\t]+concur at " + $sha + "\\b"; "m"))
+            any(.[]; (.body // "") | test("^Agent (Controller|BOSS):[ \\t]+concur at " + $sha + "\\.?[ \\t]*(\\r?\\n|$)"))
             ' <<<"$discussion_json")"
           issue_comments_scanned="$(jq '[.[]?[]?] | length' <<<"$issue_comments_json")"
           reviews_scanned="$(jq --arg sha "$pr_head_sha" \
@@ -114,10 +208,10 @@ jobs:
             conclusion="failure"
             title="PR head changed during quorum audit"
           fi
-          summary="$(printf 'author=%s\nreviewer=%s\ncontroller=%s\nhead=%s\ncurrent_head=%s\nissue_comments_scanned=%s\nreviews_scanned=%s\nlifecycle=not-enforced' \
-            "$author_found" "$reviewer_found" "$controller_found" "$pr_head_sha" "$current_head_sha" "$issue_comments_scanned" "$reviews_scanned")"
-          payload="$(jq -n --arg conclusion "$conclusion" --arg title "$title" --arg summary "$summary" \
-            '{status: "completed", conclusion: $conclusion, output: {title: $title, summary: $summary}}')"
+          summary="$(printf 'author=%s\nreviewer=%s\ncontroller=%s\nhead=%s\ncurrent_head=%s\nissue_comments_scanned=%s\nreviews_scanned=%s\neligible_signers=%s\nrun_id=%s\nrun_attempt=%s\nevent=%s\nsource_revision=%s\nlifecycle=not-enforced' \
+            "$author_found" "$reviewer_found" "$controller_found" "$pr_head_sha" "$current_head_sha" "$issue_comments_scanned" "$reviews_scanned" "$eligible_logins" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_EVENT_NAME" "$GITHUB_SHA")"
+          payload="$(jq -n --arg conclusion "$conclusion" --arg title "$title" --arg summary "$summary" --arg completed "$(date -u +%FT%TZ)" --arg url "$run_url" \
+            '{status: "completed", conclusion: $conclusion, completed_at: $completed, details_url: $url, output: {title: $title, summary: $summary}}')"
           gh api "repos/${GITHUB_REPOSITORY}/check-runs/${check_id}" \
             -X PATCH --input - <<<"$payload" >/dev/null
 

@@ -54,8 +54,12 @@ def main():
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--issue", type=int)
     target.add_argument("--pr", type=int)
+    parser.add_argument("--discussion", action="store_true",
+                        help="Include all PR comment and review pages")
     parser.add_argument("--worktree", type=Path, default=Path.cwd())
     args = parser.parse_args()
+    if args.discussion and not args.pr:
+        parser.error("--discussion requires --pr")
     worktree = read_command("git", "-C", str(args.worktree), "rev-parse", "--show-toplevel")
     actual_repo = read_json("gh", "repo", "view", "--json", "nameWithOwner", cwd=worktree)
     # Resolve the selected checkout's remote, then pin every GitHub query.
@@ -76,9 +80,14 @@ def main():
         result["issue"] = read_json("gh", "issue", "view", str(args.issue), "--repo", REPO,
                                     "--json", "number,title,state,body,url")
     if args.pr:
-        fields = "number,title,state,url,baseRefName,baseRefOid,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,files"
+        fields = "number,title,body,state,url,baseRefName,baseRefOid,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,files"
         pr = read_json("gh", "pr", "view", str(args.pr), "--repo", REPO, "--json", fields)
         pr["review_threads"] = review_threads(args.pr)
+        if args.discussion:
+            for field, endpoint in (("comments", "issues"), ("reviews", "pulls")):
+                pages = read_json("gh", "api", "--paginate", "--slurp",
+                                  f"repos/{REPO}/{endpoint}/{args.pr}/{field}?per_page=100")
+                pr[field] = [item for page in pages for item in page]
         # Reading checks and threads takes multiple requests; reject a mixed-head snapshot.
         refreshed_head = read_json("gh", "pr", "view", str(args.pr), "--repo", REPO,
                                   "--json", "headRefOid")["headRefOid"]

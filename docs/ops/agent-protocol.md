@@ -71,15 +71,27 @@ Agent R3: no findings on <full-head-sha>
 Agent Controller: concur at <full-head-sha>
 ```
 
-`WS2` may occupy the author seat. The parser also accepts the historical
-worker form `Agent WS1: implemented ... at <full-head-sha>` and the legacy
-controller alias. Use the canonical forms above for new attestations.
+`WS2` may occupy the author seat. The parser also accepts the existing
+ADR-0007 deployment form `Agent WS1: implemented and live-proved ADR-0007
+extract-api deployment at <full-head-sha>` and the legacy controller alias.
+Use the canonical forms above for new attestations, as the first line of
+the body. An optional final period is accepted; put evidence on subsequent
+lines. Examples, quoted signatures and signatures with withdrawal text
+on the same line do not count.
 Only attest to work actually performed, and post only when authorized.
+
+Signers must be GitHub users with current `write`, `maintain` or `admin`
+repository permission. The publisher verifies access through the GitHub
+API; comment association alone is insufficient. This excludes outsiders
+and bots without claiming separate credentials for the governance roles.
 
 The workflow reads all pages of PR issue comments and reviews. A review
 contributes only when its state is `COMMENTED` or `APPROVED` and its
 `commit_id` matches the current head. Dismissed, pending, changes-requested
-and older commit reviews are excluded. Retract an issue-comment signature
+and older commit reviews are excluded. A later `CHANGES_REQUESTED` review
+on the same head invalidates earlier review signatures from that account;
+a subsequent positive signed review can restore them. Issue-comment
+signatures remain until edited or deleted. Retract an issue-comment signature
 by editing or deleting it; retract a review signature by editing or
 dismissing the review. Withdrawal triggers a fresh evaluation.
 
@@ -91,13 +103,52 @@ The live `main-protection` ruleset requires `quorum-audit` alongside
 changing it does not change GitHub settings.
 
 The runner job is named `quorum-publisher`; only its published PR-head
-check is named `quorum-audit`. Runs for one PR serialize publication.
+check is named `quorum-audit`. Runs for one PR serialize publication after
+resolving the PR number. The trusted publisher uses `pull_request_target`,
+`issue_comment` and `workflow_run`. It never checks out PR code or reads
+observer artifacts. A read-only `quorum-review-events` workflow relays
+review changes; the publisher reads the live GitHub discussion. Fork
+events without PR metadata resolve through the commit's associated PRs.
+Old-head review events cannot overwrite the current head's result.
 The publisher marks its managed check in progress before reading
 signatures, then updates it to success or failure. A changed head or an
 API/evaluation error cannot certify quorum. Publishing failures fail the
 runner job and can leave the managed check pending. Errors before that
 check can be created or updated require inspection of the publisher;
 no fresh verification exists in that case.
+
+Every evaluation refreshes the check's start/completion times and links to
+its publisher run. Its summary records run ID/attempt, event and workflow
+source revision as well as the evaluated PR head. A relay that is missing,
+disabled or altered provides no fresh review-event verification: inspect
+the observer and publisher, then use the trusted manual refresh below.
+
+## Merge and post-merge verification
+
+Before merge, freeze the head, obtain independent R3/Controller/L1 evidence,
+publish truthful attestations, and verify every required check is terminal
+success on that head. Inspect all same-name quorum checks and unresolved
+review threads. Confirm the base and session merge authority. Squash with
+`gh pr merge <pr> --squash --match-head-commit <full-head-sha>`.
+
+For a manual refresh or recovery, run the default-branch publisher with
+`gh workflow run quorum-audit.yml --ref main -f pr_number=<pr>
+-f expected_head=<full-head-sha>`. A mismatched head fails without
+certifying a different commit.
+
+When changing the publisher itself, comment events still run the old
+default-branch version until merge. For the initial migration, submit
+commit-bound `COMMENTED` reviews and explicitly dispatch the reviewed
+candidate branch instead of `main`. Verify its run source revision and
+all required-check results; do not bypass protection or overwrite legacy
+checks. Older unmanaged checks are preserved and require actual readback.
+
+After squash, verify the merge commit and landed tree on `main`, successful
+main CI, and unchanged protection. Post a verification comment on the
+merged PR to exercise the new default-branch publisher against its original
+PR head. Verify check reuse, refreshed provenance and success. A merged
+PR can be audited for rollout proof; a closed unmerged PR is ignored.
+This governance slice does not require a product deployment.
 
 L1 is still a procedural seat. Its verdict names the slice, full head SHA
 and stage, distinguishing local validation, hosted CI, quorum, merge and

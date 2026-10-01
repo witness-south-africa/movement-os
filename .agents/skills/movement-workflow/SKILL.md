@@ -27,6 +27,7 @@ From the actual worktree, get a read-only intake snapshot:
 ```sh
 python3 -B scripts/agent_intake.py --issue 22
 python3 -B scripts/agent_intake.py --pr 32
+python3 -B scripts/agent_intake.py --pr 32 --discussion
 ```
 
 Replace the example number with the task's issue or PR. The helper reports
@@ -41,6 +42,8 @@ Use `Agent Controller` for new controller attestations. Legacy labels are
 only a parser compatibility concern; see the protocol for exact formats.
 Post attestations only for work actually performed and when posting is
 authorized. A skill invocation does not authorize merges or deployment.
+For merge and rollout work, follow the protocol's merge/post-merge checks,
+including the candidate-branch bootstrap when changing the publisher.
 
 After a completed slice, correct instructions only when observed failures
 or repeated work justify it. Keep shared rules in the protocol and role

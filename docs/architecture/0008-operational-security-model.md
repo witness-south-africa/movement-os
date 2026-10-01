@@ -76,7 +76,10 @@ defines the accepted signature forms and review-state semantics. The
 workflow reads all comment and review pages, and accepts review bodies
 only in `COMMENTED` or `APPROVED` state on the current PR head commit.
 Editing or deleting an issue comment, or editing/dismissing a review,
-triggers a fresh evaluation. Role labels do not prove distinct identities.
+triggers a fresh evaluation. Later changes-requested reviews invalidate
+older review signatures from that account on the same head. Signers need
+current write, maintain or admin access; role labels still do not prove
+distinct identities.
 
 Label changes must update the workflow, ADR, README and operator
 references together, with validation for new and retained legacy forms.
@@ -113,8 +116,12 @@ error. Publication errors fail visibly and can leave the check pending.
 An error before creating or updating the check provides no fresh quorum
 proof; inspect the publisher failure rather than relying on an old result.
 
-The publisher does not check out or execute PR code. Offline regression
-tests exercise the actual workflow shell with a simulated GitHub API.
+The publisher runs trusted default-branch code on PR-target, comment and
+review-observer completion events. It does not check out PR code or read
+observer artifacts. The review observer has a read-only token, including
+for forks and Dependabot. Check timestamps and the publisher link refresh
+on every evaluation. Offline regression tests exercise the actual workflow
+shell with a simulated GitHub API.
 
 ## Ranked hardening plan
 
@@ -172,6 +179,8 @@ publisher job, making errors visible, and introducing Controller with
 legacy compatibility. Existing workflow-job checks on old PR heads are
 historical records; their reconciliation must be verified on the actual
 PR surface, rather than assuming a publisher fix clears them.
+The [operator protocol](../ops/agent-protocol.md#merge-and-post-merge-verification)
+defines candidate-branch bootstrap, manual recovery and post-merge proof.
 
 ## Consequences
 
