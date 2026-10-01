@@ -1,208 +1,163 @@
 # Agent Protocol — `movement-os`
 
-Operator-facing protocol for running role-based AI work inside this
-repository.
+Shared contract for governance work on this repository. Product runtime
+packages under `packages/agent-*` have a separate purpose.
 
-This document is about **governance-time agent work on the repo**. It
-is not about the runtime packages under `packages/agent-*`.
+See [ADR-0008](../architecture/0008-operational-security-model.md),
+[the cheat sheet](./agent-cheat-sheet.md), and
+[the prompt pack](./agent-prompts.md). The discoverable repo skill is
+[Movement workflow](../../.agents/skills/movement-workflow/SKILL.md).
 
-See also:
+## Roles
 
-- [ADR-0008](../architecture/0008-operational-security-model.md)
-- [Agent Cheat Sheet](./agent-cheat-sheet.md)
-- [Agent Prompt Pack](./agent-prompts.md)
+| Role       | Label                     | Reference                                            |
+| ---------- | ------------------------- | ---------------------------------------------------- |
+| Controller | `Agent Controller`        | [Scope and integration](./roles/controller.md)       |
+| Worker     | `Agent WS1` / `Agent WS2` | [Implementation and validation](./roles/worker.md)   |
+| Reviewer   | `Agent R3`                | [Independent diff review](./roles/reviewer.md)       |
+| Lifecycle  | `Agent L1`                | [Evidence and stage readiness](./roles/lifecycle.md) |
 
-## Purpose
+Use Controller for new work. The parser retains `Agent BOSS` only as a
+legacy alias so existing PR attestations remain usable. Labels describe
+procedural roles; they do not establish separate credential identities.
 
-The goal is to make AI-assisted repo work:
+## Slice and intake
 
-- slice-based rather than vague
-- independently reviewable
-- certifiable against current repo truth
-- readable by humans after the fact
+A slice is the smallest coherent change that can be described, validated,
+reviewed and committed independently. One workflow with its operator docs
+is a slice; unrelated dirty files are separate work.
 
-The protocol is designed for a repo that currently has procedural
-separation of roles, not technical separation of identities.
+At intake, record:
 
-## Role model
+- issue or PR, role and problem
+- actual worktree and branch, base/head SHA, dirty files
+- files in scope and acceptance criteria
+- current authorization and outstanding handoffs
 
-Canonical roles:
+From the worktree, `python3 -B scripts/agent_intake.py --issue 22` or
+`--pr 32` reports local and live GitHub state. Replace the number with the
+assigned issue or PR. It is read-only and does not fetch or change the
+checkout. API errors leave intake incomplete.
 
-| Canonical role | Current v1 label | Responsibility |
-| --- | --- | --- |
-| Controller | `BOSS` | Defines the slice, drives the task, integrates findings |
-| Worker | `WS1` or `WS2` | Implements or validates the scoped change |
-| Reviewer | `R3` | Independently reviews the slice for bugs, regressions, and ambiguity |
-| Lifecycle | `L1` | Verifies the slice against current repo truth and validation evidence |
+Preserve unrelated work and use an isolated worktree for implementation.
+A missing detail calls for clarification only when it materially changes
+scope or prevents progress; routine choices belong to the assigned role.
 
-Important:
+## Independent contexts and handoffs
 
-- The canonical roles are the durable concept.
-- The current labels are the repo's v1 protocol labels.
-- Today, `.github/workflows/quorum-audit.yml` still parses the current
-  v1 labels verbatim.
-- On GitHub, attestation comments must use the parseable `Agent ...`
-  form, for example `Agent WS1`, `Agent R3`, and `Agent BOSS`.
+Use a new context for a new role or slice. Continue an existing context
+for the same role and slice, refreshing current files and evidence.
+Independent review and verification require a context separate from the
+author. Use delegation when available and authorized; otherwise leave
+those seats pending rather than claiming them yourself.
 
-## Core rules
+The normal sequence is Controller intake, Worker implementation, Reviewer
+findings, Controller integration, then Lifecycle verification. If a
+Controller implements, it takes authorship responsibility for that work.
+It cannot supply independent review or certification of the same change.
 
-1. Every run must name the role.
-2. Every run must name the slice.
-3. Different roles use different conversations.
-4. Different slices use different conversations.
-5. A role must verify current files, not rely on summaries.
-6. `L1` certifies a slice, not an entire dirty worktree.
+Every handoff identifies the slice, full head SHA, changed files, commands
+and results, unresolved questions and next role. Refresh commit-bound
+proof after a head change. When only the base advances, inspect the delta
+and refresh the proof it affects.
 
-## Slice definition
+## Quorum attestations
 
-A **slice** is the smallest coherent change that can be:
+For the full current PR head SHA:
 
-- described clearly
-- validated narrowly
-- reviewed independently
-- committed without dragging unrelated files with it
+```text
+Agent WS1: authored at <full-head-sha>
+Agent R3: no findings on <full-head-sha>
+Agent Controller: concur at <full-head-sha>
+```
 
-Good slices:
+`WS2` may occupy the author seat. The parser also accepts the existing
+ADR-0007 deployment form `Agent WS1: implemented and live-proved ADR-0007
+extract-api deployment at <full-head-sha>` and the legacy controller alias.
+Use the canonical forms above for new attestations, as the first line of
+the body. An optional final period is accepted; put evidence on subsequent
+lines. Examples, quoted signatures and signatures with withdrawal text
+on the same line do not count.
+Only attest to work actually performed, and post only when authorized.
 
-- one workflow + the docs that explain it
-- one package fix across a uniform set of files
-- one ADR clarification
+Signers must be GitHub users with current `write`, `maintain` or `admin`
+repository permission. The publisher verifies access through the GitHub
+API; comment association alone is insufficient. This excludes outsiders
+and bots without claiming separate credentials for the governance roles.
 
-Bad slices:
+The workflow reads all pages of PR issue comments and reviews. A review
+contributes only when its state is `COMMENTED` or `APPROVED` and its
+`commit_id` matches the current head. Dismissed, pending, changes-requested
+and older commit reviews are excluded. A later `CHANGES_REQUESTED` review
+on the same head invalidates earlier review signatures from that account;
+a subsequent positive signed review can restore them. Issue-comment
+signatures remain until edited or deleted. Retract an issue-comment signature
+by editing or deleting it; retract a review signature by editing or
+dismissing the review. Withdrawal triggers a fresh evaluation.
 
-- “whatever is dirty”
-- unrelated docs plus code plus workflow churn
-- a mixed worktree with no named boundary
+## Required check and certification
 
-## Conversation rules
+The live `main-protection` ruleset requires `quorum-audit` alongside
+`lint`, `typecheck`, `test` and `build`. The checked-in
+[ruleset snapshot](../../ruleset-main.json) records that configuration;
+changing it does not change GitHub settings.
 
-Default rule:
+The runner job is named `quorum-publisher`; only its published PR-head
+check is named `quorum-audit`. Runs for one PR serialize publication after
+resolving the PR number. The trusted publisher uses `pull_request_target`,
+`issue_comment` and `workflow_run`. It never checks out PR code or reads
+observer artifacts. A read-only `quorum-review-events` workflow relays
+review changes; the publisher reads the live GitHub discussion. Fork
+events without PR metadata resolve through the commit's associated PRs.
+Old-head review events cannot overwrite the current head's result.
+The publisher marks its managed check in progress before reading
+signatures, then updates it to success or failure. A changed head or an
+API/evaluation error cannot certify quorum. Publishing failures fail the
+runner job and can leave the managed check pending. Errors before that
+check can be created or updated require inspection of the publisher;
+no fresh verification exists in that case.
 
-- new role -> new conversation
-- new slice -> new conversation
+Every evaluation refreshes the check's start/completion times and includes
+a publisher link in its summary; GitHub can override the check details URL.
+The summary records run ID/attempt, event and workflow
+source revision as well as the evaluated PR head. A relay that is missing,
+disabled or altered provides no fresh review-event verification: inspect
+the observer and publisher, then use the trusted manual refresh below.
 
-Reuse the same conversation only when:
+## Merge and post-merge verification
 
-- it is the same role
-- on the same slice
-- continuing the same job
+Before merge, freeze the head, obtain independent R3/Controller/L1 evidence,
+publish truthful attestations, and verify every required check is terminal
+success on that head. Inspect all same-name quorum checks and unresolved
+review threads. Confirm the base and session merge authority. Squash with
+`gh pr merge <pr> --squash --match-head-commit <full-head-sha>`.
 
-Examples:
+For a manual refresh or recovery, run the default-branch publisher with
+`gh workflow run quorum-audit.yml --ref main -f pr_number=<pr>
+-f expected_head=<full-head-sha>`. A mismatched head fails without
+certifying a different commit.
 
-- `BOSS` responding to `R3` findings on the same slice -> same `BOSS`
-  conversation is acceptable
-- `WS1` moving from a governance slice to a Jest slice -> new
-  conversation
-- `L1` re-checking the same slice after a wording fix -> same `L1`
-  conversation is acceptable, but it must refresh from current files
+When changing the publisher itself, comment events still run the old
+default-branch version until merge. For the initial migration, submit
+commit-bound `COMMENTED` reviews and explicitly dispatch the reviewed
+candidate branch instead of `main`. Verify its run source revision and
+all required-check results; do not bypass protection or overwrite legacy
+checks. Older unmanaged checks are preserved and require actual readback.
 
-## Standard loop
+After squash, verify the merge commit and landed tree on `main`, successful
+main CI, and unchanged protection. Post a verification comment on the
+merged PR to exercise the new default-branch publisher against its original
+PR head. Also edit a commit-bound review without changing its signature,
+then verify the read-only observer triggers a successful trusted publisher.
+Verify check reuse, refreshed provenance and success. A merged
+PR can be audited for rollout proof; a closed unmerged PR is ignored.
+This governance slice does not require a product deployment.
 
-### 1. BOSS
+L1 is still a procedural seat. Its verdict names the slice, full head SHA
+and stage, distinguishing local validation, hosted CI, quorum, merge and
+deployment evidence. Readiness for one stage does not certify another.
+Artifacts establish observations on their recorded dates.
 
-`BOSS`:
-
-- inspects the repo and current worktree
-- names the slice
-- states the task boundary
-- decides whether work should proceed
-
-### 2. WS1
-
-`WS1`:
-
-- works only on the named slice
-- refuses to guess when scope is ambiguous
-- makes the smallest correct change
-- runs the narrowest sensible validation
-
-### 3. R3
-
-`R3`:
-
-- reviews only the named slice
-- looks for bugs, regressions, ambiguity, and operator failure modes
-- does not widen scope casually
-
-### 4. BOSS follow-up
-
-If `R3` finds issues, `BOSS`:
-
-- addresses the findings
-- narrows or clarifies scope if needed
-- states what changed and what did not
-
-### 5. L1
-
-`L1`:
-
-- verifies current file truth for the slice
-- checks whether the implementation, docs, and validation line up
-- certifies the slice or rejects it with exact reasons
-
-## Mixed dirty worktrees
-
-Dirty worktrees are allowed. What is not allowed is pretending a mixed
-worktree is one slice when it is not.
-
-If the tree contains multiple coherent buckets:
-
-- name the intended bucket explicitly
-- leave unrelated buckets alone
-- commit slices separately
-- run separate `WS1 -> R3 -> BOSS -> L1` loops for each slice
-
-## What each role must output
-
-`BOSS` should output:
-
-- scope
-- plan
-- edits or decision
-- validation
-- summary
-
-`WS1` should output:
-
-- scope
-- plan
-- implementation
-- validation
-- handoff
-
-`R3` should output:
-
-- findings first
-- file references
-- `no findings` if none
-- residual risk
-
-`L1` should output:
-
-- `ready` / `not ready`
-- exact reasons
-- files inspected
-- validation reviewed
-- residual risk
-
-## Certification boundary
-
-`L1` certifies only what was actually verified.
-
-That means:
-
-- if unrelated files are dirty, they are out of scope unless explicitly
-  included
-- if a role relied on stale conclusions, `L1` can reject and require a
-  refresh from current files
-- if the slice is good but the worktree is broader, certify the slice
-  only
-
-## Current repo-specific notes
-
-- Governance roles are distinct from runtime `packages/agent-*` code.
-- `quorum-audit.yml` is currently report-only.
-- `Agent L1` remains unenforced in automation today.
-- The current repo still has only one write-capable GitHub identity, so
-  this protocol improves discipline and auditability, not technical
-  separation of powers.
+Only one GitHub identity currently has write access. Role separation
+improves review discipline and auditability; technical separation remains
+an identity-hardening task under issue #22.
