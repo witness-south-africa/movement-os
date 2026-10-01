@@ -38,10 +38,12 @@ Please read:
 
 ## Development workflow
 
-Requires Node 22+ and pnpm 9+.
+Requires Node 22+ and the pinned pnpm 10.34.6 via Corepack.
+See [dependency policy](docs/ops/security-scans.md#dependency-policy) for install controls.
 
 ```sh
-pnpm install
+corepack enable
+pnpm install --frozen-lockfile
 pnpm nx run-many -t test
 pnpm nx run-many -t build
 pnpm nx run-many -t lint

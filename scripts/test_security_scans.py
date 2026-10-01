@@ -99,9 +99,22 @@ class SecurityScanTests(unittest.TestCase):
 
     def test_semgrep_report_errors_and_empty_scans_fail(self):
         for payload in ({**SEMGREP_CLEAN, 'errors': [{'message': PRIVATE}]},
-                        {**SEMGREP_CLEAN, 'paths': {'scanned': []}}):
+                        {**SEMGREP_CLEAN, 'paths': {'scanned': []}},
+                        {**SEMGREP_CLEAN, 'paths': {'scanned': [None]}},
+                        {**SEMGREP_CLEAN, 'paths': {'scanned': ['']}}):
             with self.subTest(payload=payload):
                 self.assertEqual(self.run_scan('semgrep', payload).returncode, 2)
+
+    def test_error_types_are_whitelisted_without_messages_or_arbitrary_fields(self):
+        payload = {**SEMGREP_CLEAN, 'errors': [
+            {'type': 'ParseError', 'message': PRIVATE, 'path': PRIVATE},
+            {'type': PRIVATE, 'message': PRIVATE},
+            {'type': {'private': PRIVATE}},
+            PRIVATE,
+        ]}
+        result = self.run_scan('semgrep', payload, 2)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('error_types={"ParseError": 1, "other": 3}', result.stdout)
 
     def test_location_fields_cannot_publish_arbitrary_report_data(self):
         payload = {**SEMGREP_CLEAN, 'results': [

@@ -1,2 +1,18 @@
 packages:
-  - "packages/*"
+  - 'packages/*'
+
+packageManagerStrictVersion: true
+# Resolution/update policies; frozen installs preserve the reviewed lockfile.
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+
+strictDepBuilds: true
+# Reviewed native-tool installation scripts; version updates require review.
+allowBuilds:
+  '@swc/core@1.5.29': true
+  'esbuild@0.27.3': true
+  'nx@21.6.11': true
+  'sharp@0.34.5': true
+  'unrs-resolver@1.11.1': true
+  'workerd@1.20260415.1': true

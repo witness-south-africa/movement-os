@@ -1,8 +1,15 @@
 """Publish scan counts/locations without source snippets and preserve failures."""
 
 import json
+from collections import Counter
 from pathlib import Path
 import sys
+
+
+SAFE_ERROR_TYPES = frozenset({
+    'SemgrepError', 'ParseError', 'LexicalError', 'Timeout', 'MatchingError',
+    'InvalidRuleSchemaError', 'UnknownLanguageError', 'IncompatibleRule',
+})
 
 
 def report(tool, path, status):
@@ -13,7 +20,7 @@ def report(tool, path, status):
             scanned = data['paths']['scanned']
             if not all(isinstance(value, list) for value in (findings, errors, scanned)):
                 raise ValueError('invalid report')
-            if not scanned:
+            if not scanned or not all(isinstance(path, str) and path for path in scanned):
                 raise ValueError('no scanned files')
             locations = [{'file': item['path'], 'rule': item['check_id'],
                           'line': item['start']['line']} for item in findings]
@@ -39,6 +46,14 @@ def report(tool, path, status):
     print(f'{tool}: findings={len(findings)} errors={len(errors)} scanner_exit={status}')
     if tool == 'semgrep':
         print(f'semgrep: scanned_files={len(scanned)}')
+        if errors:
+            # Error messages can contain source or secrets. Only known type names
+            # are safe to retain after ephemeral runner diagnostics disappear.
+            types = Counter()
+            for error in errors:
+                kind = error.get('type') if isinstance(error, dict) else None
+                types[kind if isinstance(kind, str) and kind in SAFE_ERROR_TYPES else 'other'] += 1
+            print('semgrep: error_types=' + json.dumps(types, sort_keys=True))
     for location in locations:
         # JSON escaping keeps untrusted filenames from injecting workflow commands.
         print(json.dumps(location, ensure_ascii=True))

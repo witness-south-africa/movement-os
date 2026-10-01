@@ -1,4 +1,4 @@
-import { createHmac, createHash } from 'node:crypto';
+import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { canonicalizeSignatureInput } from './auth.js';
 import { BudgetExhaustedError } from './budget-guard.js';
 import { createWorker } from './index.js';
@@ -138,13 +138,14 @@ describe('deployed auth telemetry path', () => {
       },
     });
     const hash = createHash('sha256').update(body).digest('hex');
-    const signature = createHmac('sha256', 'test-only-secret')
+    const key = randomBytes(32).toString('hex');
+    const signature = createHmac('sha256', key)
       .update(
         canonicalizeSignatureInput('POST', '/v1/extract', timestamp, hash),
       )
       .digest('hex');
     Object.assign(harness.env, {
-      OPERATOR_HMAC_KEY_OPS_01: 'test-only-secret',
+      OPERATOR_HMAC_KEY_OPS_01: key,
     });
     for (const keyId of ['OPS-01', 'OPS+01', 'OPS_01']) {
       const response = await harness.dispatch(
