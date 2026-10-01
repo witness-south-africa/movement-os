@@ -34,21 +34,21 @@ Miniflare 5 prereleases; this slice retains Miniflare 4 and patches its two
 remaining exact dependency constraints. Worker compatibility dates and
 production deployments are unchanged by these development-tool updates.
 
-| Reported dependency        | Base parent path                                    | Selected fixed version(s)   |
-| -------------------------- | --------------------------------------------------- | --------------------------- |
-| `@babel/core`              | Nx JS and Jest transform                            | `7.29.7`                    |
-| `axios`                    | Nx                                                  | `1.20.0`                    |
-| `baseline-browser-mapping` | Babel → browserslist                                | `2.11.25`                   |
-| `brace-expansion`          | minimatch and Nx                                    | `1.1.21`, `2.1.7`, `5.0.12` |
-| `browserslist`             | Babel compilation targets/core-js                   | `4.29.1`                    |
-| `esbuild`                  | Wrangler                                            | `0.28.1`                    |
-| `fast-uri`                 | Ajv                                                 | `3.1.8`                     |
-| `form-data`                | Nx/Axios and Verdaccio → Cypress request            | `4.0.6`                     |
-| `js-yaml`                  | ESLint, Istanbul, Yarn parsers and Verdaccio config | `3.15.2`, `4.3.2`, `5.4.2`  |
-| `qs`                       | Verdaccio → Express/body-parser/Cypress request     | `6.16.0`                    |
-| `sharp`                    | Wrangler → Miniflare                                | `0.35.4`                    |
-| `undici`                   | Wrangler → Miniflare                                | `7.29.1`                    |
-| `ws`                       | Wrangler → Miniflare                                | `8.21.0`                    |
+| Reported dependency        | Base parent path                                    | Selected fixed version(s)       |
+| -------------------------- | --------------------------------------------------- | ------------------------------- |
+| `@babel/core`              | Nx JS and Jest transform                            | `7.29.7`                        |
+| `axios`                    | Nx                                                  | `1.20.0`                        |
+| `baseline-browser-mapping` | Babel → browserslist                                | `2.11.25`                       |
+| `brace-expansion`          | minimatch and Nx                                    | `1.1.21`, `2.1.7`, `5.0.12`     |
+| `browserslist`             | Babel compilation targets/core-js                   | `4.29.1`                        |
+| `esbuild`                  | Wrangler                                            | `0.28.1`                        |
+| `fast-uri`                 | Ajv                                                 | `3.1.8`                         |
+| `form-data`                | Nx/Axios and Verdaccio → Cypress request            | `4.0.6`                         |
+| `js-yaml`                  | ESLint, Istanbul, Yarn parsers and Verdaccio config | `3.15.2`, `5.4.2` (4.x retired) |
+| `qs`                       | Verdaccio → Express/body-parser/Cypress request     | `6.16.0`                        |
+| `sharp`                    | Wrangler → Miniflare                                | `0.35.4`                        |
+| `undici`                   | Wrangler → Miniflare                                | `7.29.1`                        |
+| `ws`                       | Wrangler → Miniflare                                | `8.21.0`                        |
 
 The lockfile refresh also repairs affected Babel SystemJS, minimatch,
 picomatch, tmp, Ajv and body-parser paths. Parent-qualified overrides are
