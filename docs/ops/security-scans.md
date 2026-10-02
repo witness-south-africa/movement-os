@@ -1,5 +1,8 @@
 # Security scan results
 
+Repository posture and source inventories are covered separately by
+[Scorecard and SBOM reports](./supply-chain-reports.md).
+
 The `security` workflow uses free Gitleaks CLI 8.30.1 (verified release
 archive checksum) and Semgrep CE 1.178.0 (official image digest). Neither
 scanner needs a license secret or application token. The Semgrep registry

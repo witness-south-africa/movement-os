@@ -1,0 +1,69 @@
+name: Source SBOM
+
+on:
+  push:
+    tags: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: sbom
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SYFT_VERSION: 1.52.0
+      SYFT_ARCHIVE_SHA256: caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+      SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES: 'true'
+      SBOM_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      SBOM_REF: ${{ github.ref }}
+    steps:
+      - name: Checkout inventory revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.SBOM_COMMIT }}
+          persist-credentials: false
+      - name: Install verified Syft
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TEMP/syft"
+          mkdir -p "$tool_dir"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$tool_dir/syft.tar.gz" \
+            "https://github.com/anchore/syft/releases/download/v$SYFT_VERSION/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$SYFT_ARCHIVE_SHA256" "$tool_dir/syft.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tool_dir/syft.tar.gz" -C "$tool_dir" syft
+      - name: Generate and validate source inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="$RUNNER_TEMP/source-sbom"
+          mkdir -p "$report_dir"
+          "$RUNNER_TEMP/syft/syft" scan dir:. \
+            --select-catalogers +javascript-package-cataloger \
+            --source-name movement-os --source-version "$SBOM_COMMIT" \
+            -o "spdx-json=$report_dir/movement-os.spdx.json" \
+            -o "syft-json=$report_dir/movement-os.syft.json"
+          python3 -B scripts/verify_sbom.py "$report_dir"
+          (cd "$report_dir" && sha256sum movement-os.spdx.json movement-os.syft.json provenance.json > SHA256SUMS)
+          (cd "$report_dir" && sha256sum --check --strict SHA256SUMS)
+      - name: Retain validated SBOM and provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ env.SBOM_COMMIT }}
+          path: |
+            ${{ runner.temp }}/source-sbom/movement-os.spdx.json
+            ${{ runner.temp }}/source-sbom/movement-os.syft.json
+            ${{ runner.temp }}/source-sbom/provenance.json
+            ${{ runner.temp }}/source-sbom/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
