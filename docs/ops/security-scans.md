@@ -51,6 +51,14 @@ analysis errors and CodeQL alerts: a successful upload can contain findings.
 For PR scans, bind the analyzed test-merge revision to the reviewed PR head
 and base; main analyses must name the landed commit.
 
+PR results and the service check for new alerts cover the PR comparison;
+zero new PR alerts do not prove that unchanged source is clean. Inspect
+the full landed-main analyses and open alerts before reporting a clean
+baseline. The first source-owned scan found an existing trailing-slash
+normalization regex with polynomial runtime even though the rollout PR
+reported no new alerts. Its input is a deployment-controlled environment
+binding; the finding does not establish remote exploitation.
+
 The dynamic `CodeQL - Code Quality` workflow is a separate service and does
 not establish execution of this security workflow. Live CodeQL default
 setup was `not-configured` before this source rollout; advanced setup is

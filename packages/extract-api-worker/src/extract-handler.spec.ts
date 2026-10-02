@@ -565,6 +565,56 @@ describe('@wsa/extract-api-worker/extract-handler', () => {
     }
   });
 
+  const longInternalSlashUrl = `https://api.example.test/${'/'.repeat(100_000)}end`;
+
+  it.each([
+    ['default', undefined, 'https://api.x.ai/v1'],
+    [
+      'no trailing slash',
+      'https://api.example.test/v1',
+      'https://api.example.test/v1',
+    ],
+    [
+      'one trailing slash',
+      'https://api.example.test/v1/',
+      'https://api.example.test/v1',
+    ],
+    [
+      'internal and trailing slashes',
+      'https://api.example.test//v1///',
+      'https://api.example.test//v1',
+    ],
+    ['only slashes', '////', ''],
+    ['empty configured URL', '', ''],
+    [
+      'long internal slash run',
+      `${longInternalSlashUrl}///`,
+      longInternalSlashUrl,
+    ],
+  ])(
+    'preserves fetch URL normalization for %s',
+    async (_label, configured, expected) => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      try {
+        fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }));
+        const client = createFetchXaiClient({
+          XAI_API_KEY: 'synthetic-test-key',
+          XAI_API_BASE_URL: configured,
+        } as Env);
+        await client.chat.completions.create({
+          model: 'grok-4-fast-reasoning',
+          messages: [],
+        });
+        expect(fetchSpy).toHaveBeenCalledWith(
+          `${expected}/chat/completions`,
+          expect.objectContaining({ method: 'POST' }),
+        );
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    },
+  );
+
   it('throws when the provider responds with a non-ok status', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch');
 
