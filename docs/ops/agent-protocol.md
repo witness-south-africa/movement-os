@@ -105,7 +105,9 @@ configuration; changing it does not change GitHub settings. Verify the
 live ruleset and staged rollout before treating a new requirement as active.
 
 The runner job is named `quorum-publisher`; only its published PR-head
-check is named `quorum-audit`. Runs for one PR serialize publication after
+check is named `quorum-audit`. The workflow defaults and PR resolution job
+use read-only tokens; only the publisher job grants `checks: write`.
+Runs for one PR serialize publication after
 resolving the PR number. The trusted publisher uses `pull_request_target`,
 `issue_comment` and `workflow_run`. It never checks out PR code or reads
 observer artifacts. A read-only `quorum-review-events` workflow relays

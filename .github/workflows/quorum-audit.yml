@@ -21,7 +21,6 @@ on:
 
 permissions:
   contents: read
-  checks: write
   pull-requests: read
 
 jobs:
@@ -81,6 +80,10 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
       PR_NUMBER: ${{ matrix.pr }}
