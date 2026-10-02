@@ -46,6 +46,14 @@ run in production.
 
 ## Decision
 
+### Current implementation
+
+`@wsa/events` ships event envelopes, canonicalisation and hash-chain
+utilities. `@wsa/schemas` ships bi-temporal claim/evidence fields and
+required claim source references. These are in-memory schema and utility
+boundaries. The persistent event store, Postgres deployment, graph
+projection, retrieval packages and replay-verification job remain planned.
+
 The platform adopts an **evidence graph architecture** with five
 locked commitments. This is the spine for every data-touching package
 from here forward.
@@ -162,7 +170,7 @@ provenance on every fact — maps cleanly onto this platform's needs.
 The platform adopts the **model**: validity intervals per fact,
 supersession as the only mutation, source references as a
 first-class requirement. The platform does **not** adopt the
-runtime; the graph projection is written in the platform's own code
+runtime; the planned graph projection would use the platform's own code
 against Postgres + AGE. This keeps portability and keeps the ADR
 count honest — the platform is not pinned to any upstream project's
 roadmap or licence changes.
@@ -265,9 +273,9 @@ Implementation is sequenced across follow-up commits, each with its
 own ADR only if a real decision is required. The packages implied
 by this ADR are sketched here, not ratified:
 
-1. `@wsa/events` — canonical event schemas, hash-chain utilities,
-   append-only event-log client. Pure TypeScript, no Postgres
-   dependency so the schemas stay testable in isolation.
+1. `@wsa/events` — canonical event schemas and hash-chain utilities
+   are shipped as pure TypeScript with no Postgres dependency. A
+   persistent append-only event-log client remains planned.
 2. `@wsa/graph-projection` — projector that consumes events and
    writes nodes and edges into the AGE-backed graph tables. Idempotent
    from the event stream.
@@ -278,11 +286,11 @@ by this ADR are sketched here, not ratified:
    extension bootstrap (AGE, pgvector, pg_trgm), and the projector
    rebuild job.
 
-None of these packages are written yet. The `@wsa/schemas` package
-already carries the V2 claim vocabulary (ADR-0002); adding
-`assertedAt`, `validFrom`, `validTo`, `supersededBy`, and `sourceRef`
-to the relevant entities is the first implementation commit after
-this ADR.
+Items 2-4 are not implemented. `@wsa/schemas` already carries the V2
+claim-status vocabulary (ADR-0002) and V3 claim provenance:
+`assertedAt`, `validFrom`, `validTo`, `supersededBy`, and required
+`sourceRef`. Claim source references currently support `intake` and
+`artefact`; an `event` reference is not implemented.
 
 The first field deployment will run on a single Postgres instance
 with a measured rebuild benchmark included in the POPIA assessment

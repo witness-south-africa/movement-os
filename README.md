@@ -13,8 +13,8 @@ accountable.
 This repository ships working package code on `packages/`, governance artefacts
 under `docs/architecture/` and `.github/workflows/`, field protocols under
 `docs/field/`, and the public landing page served via GitHub Pages. Cloudflare
-Email Routing, a Cloudflare Email Worker, R2-backed mail preservation, Resend
-for outbound probes, and Infisical for secrets are all in active use. The
+Email Routing and R2-backed mail preservation have an Email Worker and operator
+runbooks; outbound probes use Resend, and secret-handling runbooks use Infisical. The
 private extract API worker has a dated April 20 deployment proof bundle;
 adoption of the current source revision still needs version-linked runtime
 verification ([ADR-0007](./docs/architecture/0007-extract-api-surface.md)). The heavier graph datastore
@@ -89,7 +89,9 @@ This sentence is the platform's public API. It is pinned in
 - `.github/workflows/`
   - CI, [security scanners with visible failures](docs/ops/security-scans.md),
     and quorum-audit automation.
-    Security scans remain non-required until findings are triaged under #22.
+    Semgrep, Gitleaks, dependency review and dependency audit are required
+    by the live main policy verified on 2026-10-02. See the
+    [rollout evidence](https://github.com/witness-south-africa/movement-os/issues/22).
 - `CODEOWNERS`
   - ADR-0008 governance ownership map. Honest note: with only one current
     write-capable identity, it records intended ownership but does not create
@@ -116,6 +118,9 @@ working surfaces at this SHA:
   [extract API runbook](./docs/ops/extract-api-runbook.md).
 - Anthropic and local provider adapters beyond the currently shipped
   packages.
+- Shared provider routing and second-provider challenge orchestration.
+  The promotion gate already requires distinct-provider challenge evidence;
+  the current extraction runtime blocks promotable claims without it.
 - Any future control-plane API or CLI surfaces, if and when they are actually
   added to the repo.
 
@@ -202,6 +207,7 @@ pnpm nx sync
 
 ## Policies and runbooks
 
+- [Repository audit — 2026-10-02](./docs/ops/repository-audit-20261002.md)
 - [ACCEPTABLE_USE.md](./ACCEPTABLE_USE.md)
 - [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
 - [SECURITY.md](./SECURITY.md)
