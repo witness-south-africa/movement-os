@@ -185,8 +185,12 @@ ethical, non-coercive bounds:
 
 ## Rollout
 
-This ADR is documentation-only. Implementation lands in three focused
-follow-up changes, each with its own verify-before-implement gate:
+The schemas and field documents below are shipped. The case-engine
+orchestrator, automatic pause/retry timers and method-effectiveness
+aggregation remain planned. The lifecycle descriptions above define the
+target policy; schema status values alone do not implement that behavior.
+
+The original implementation plan has three parts:
 
 1. `@wsa/schemas` — add `Case`, `Question`, `MethodAttempt`,
    `HumanLead`, `ConsentRecord`, `ChainOfCustodyEntry`; migrate

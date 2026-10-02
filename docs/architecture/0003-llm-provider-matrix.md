@@ -9,7 +9,7 @@
 
 ADR-0001 chose a thin **`ModelProvider` contract** in
 `@wsa/agent-contracts` as the abstraction boundary, implemented by
-direct-REST adapters per provider, so the platform is never captured by
+provider adapters, so the platform is never captured by
 a single vendor. That ADR did not pick concrete _model providers_. This
 one does.
 
@@ -31,7 +31,7 @@ Three things force the decision:
 `movement-os` adopts a **three-lane provider model** behind a single
 `ModelProvider` abstraction.
 
-### Providers shipped in v0.1
+### Shipped and reserved providers
 
 - `openai` — OpenAI API. Default adapter, already chosen in ADR-0001.
 - `xai` — xAI (Grok) API. Added day one. xAI's API is OpenAI-
@@ -39,14 +39,15 @@ Three things force the decision:
   is thin. Grok supports tool use, function calling, and schema-
   constrained structured outputs, which matches the platform's
   extraction and drafting workloads.
-- `anthropic` — Claude API. Optional second verification lane.
-- `local` — placeholder for a local / self-hosted provider
-  (e.g. Ollama, vLLM) added in a later ADR. Referenced here so
-  routing rules can already name it.
+- `anthropic` — reserved provider ID for a future Claude adapter; no
+  adapter package is shipped.
+- `local` — reserved provider ID for a future local / self-hosted
+  adapter; no adapter package is shipped.
 
 ### The three lanes
 
-Every task on the platform is routed into one of three lanes.
+The policy defines three lanes. Callers currently select and construct
+providers; no shared dispatcher implements automatic lane routing.
 
 **Lane 1 — Sensitive intake lane.**
 Unredacted witness intake, raw identifying information, minors'
@@ -74,68 +75,43 @@ multi-model agreement and a human `Approval` record.
 
 ### The `ModelProvider` interface
 
-Shipped in `@wsa/agent-contracts` (follow-up implementation PR).
-Sketch of the contract:
+The shipped contract is defined in
+[`model-provider.ts`](../../packages/agent-contracts/src/lib/model-provider.ts):
+a provider `id` and a generic `complete()` method whose response value is
+inferred from the caller's required Zod schema. There are no capability
+flags or residency guarantees on this interface.
 
-```ts
-// @wsa/agent-contracts
-export type LlmProviderId = 'openai' | 'xai' | 'anthropic' | 'local';
+[`CompleteArgs`](../../packages/agent-contracts/src/lib/complete-args.ts)
+carries `schema`, `messages`, `taskKind`, optional tools, output-token and
+timeout limits, and an optional `requestId`.
+[`AgentTaskKind`](../../packages/agent-contracts/src/lib/task-kind.ts)
+is `sensitive-intake | analysis | challenge`. Workloads such as extraction
+and dossier drafting are policy use cases, not additional shipped task IDs.
 
-export interface ModelProvider {
-  readonly id: LlmProviderId;
-  readonly supportsStructuredOutput: boolean;
-  readonly supportsToolCalls: boolean;
-  readonly residencyGuarantee: 'zero-retention' | 'standard' | 'unknown';
+### Intended routing and current wiring
 
-  complete<TSchema>(args: {
-    task: AgentTaskKind;
-    messages: AgentMessage[];
-    schema?: TSchema; // Zod schema for structured output
-    tools?: ToolSpec[];
-    traceId: string; // threaded into the audit log
-  }): Promise<ModelResponse<TSchema>>;
-}
-
-export type AgentTaskKind =
-  | 'intakeRedaction'
-  | 'claimExtraction'
-  | 'contradictionReview'
-  | 'dossierDrafting'
-  | 'publicationDrafting'
-  | 'challenge';
-```
-
-### Task-to-provider routing (default)
-
-```ts
-// config shipped as a default; operators may override per deployment
-export const defaultRouting: Record<AgentTaskKind, LlmProviderId> = {
-  intakeRedaction: 'openai', // or 'local' when local adapter ships
-  claimExtraction: 'xai',
-  contradictionReview: 'openai', // deliberate cross-check vs extraction
-  dossierDrafting: 'xai',
-  publicationDrafting: 'xai',
-  challenge: 'anthropic', // third opinion before promotion
-};
-```
-
-The routing table above remains the platform intent, but `movement-os`
-does not yet ship a shared `config/routing.yaml`. The current v0.1
+The lane policy above remains the platform intent. `movement-os` does
+not ship a default routing table or shared `config/routing.yaml`.
+The current v0.1
 runtime wiring is package-local: callers choose a provider when they
 construct the runtime that invokes it. The first real consumer is
 `@wsa/evidence-engine`, which uses xAI in the analysis lane for
 structured claim extraction and immediately runs the promotion gate
 before returning results.
 
-### What xAI **does** on this platform
+The extraction runtime currently passes `providerRuns: []` to the gate.
+It does not dispatch a second provider. The gate's distinct-provider
+challenge requirement already exists, and blocked `high-confidence` or
+`conclusive` requests are downgraded to `contested`. Callers of the gate
+must supply claim-bound provider-run evidence; live challenge orchestration
+remains implementation work.
 
-- Structured claim extraction from documents and transcripts.
-- Affidavit summarisation (from redacted / consented text only).
-- Archive-result triage — ranking probable matches from search results.
-- Contradiction highlighting across sources in the case graph.
-- Draft timeline building.
-- Public-facing thread and dossier drafts (always human-gated before
-  publication).
+### Analysis workloads
+
+- Shipped: structured claim extraction through `@wsa/evidence-engine`.
+- Planned: affidavit summarisation, archive-result triage, contradiction
+  highlighting, timeline building, and thread or dossier drafting.
+  These require their own runtime consumers and human publication gates.
 
 ### Runtime controls for xAI
 
@@ -178,8 +154,9 @@ deployed surface actually invokes that path.
 - Publish unreviewed allegations.
 - Hold the only copy of any sensitive artefact.
 
-These constraints are enforced by the `@wsa/guardrails` rules and by
-the `Approval` gate in `@wsa/schemas`. The runtime enforcement now
+The tone and evidence-promotion checks live in `@wsa/guardrails`.
+`@wsa/schemas` defines the human `Approval` record; an end-to-end
+publication service that enforces it is not shipped. Promotion enforcement
 lives in `packages/guardrails/src/lib/evidence-gate.ts`, where
 promotion to `conclusive` / `high-confidence` is blocked unless the
 evidence bundle satisfies ADR-0005 and at least one challenge-lane run
@@ -187,13 +164,12 @@ exists from a provider different from the claim-producing analysis run.
 
 ## Data handling
 
-xAI's published enterprise terms (SOC 2 Type 2, GDPR, CCPA, zero-
-retention options, data-processor DPA) are sufficient for **Lane 2**
-use in a typical WSA deployment. They are **not** sufficient on their
-own for **Lane 1**; Lane 1 requires a POPIA-specific assessment per
-deployment. The same principle applies to OpenAI and Anthropic —
-provider terms do not substitute for the operator's POPIA
-responsibility. See [`POPIA.md`](../../POPIA.md).
+Provider terms and retention arrangements require operator review for the
+actual deployment and material being processed, including **Lane 2**.
+The shipped adapters do not verify contractual terms or data residency.
+**Lane 1** requires its own POPIA-specific assessment per deployment.
+The same principle applies to OpenAI and Anthropic. See
+[`POPIA.md`](../../POPIA.md).
 
 ## Consequences
 
@@ -213,7 +189,7 @@ responsibility. See [`POPIA.md`](../../POPIA.md).
   wired in, four when `local` is.
 - Small extra latency and cost per promotion (challenge lane).
 - Operators must make a routing decision rather than get a defaults-
-  only experience. Mitigated by shipping a sensible default routing.
+  only experience. Shared routing defaults remain implementation work.
 
 ## Rollout
 
@@ -221,7 +197,8 @@ Rollout has now partially landed:
 
 1. `@wsa/agent-contracts` — `ModelProvider` interface, `AgentTaskKind`,
    `ModelResponse<T>`.
-2. `@wsa/agent-xai` — xAI adapter with telemetry / budget controls.
+2. `@wsa/agent-openai` and `@wsa/agent-xai` — shipped adapters;
+   xAI includes telemetry / budget controls.
 3. Guardrails rules in
    `packages/guardrails/src/lib/evidence-gate.ts`: promotion to
    `conclusive` / `high-confidence` requires supporting evidence from
@@ -231,8 +208,8 @@ Rollout has now partially landed:
    consuming `@wsa/agent-xai` and immediately applying the promotion
    gate before returning audit-ready output.
 5. Remaining follow-ups:
-   - `@wsa/agent-openai` reference adapter
    - `@wsa/agent-anthropic` parity adapter
+   - local / self-hosted adapter
    - deployment-level routing config + audit-log integration
    - challenge-lane orchestration above the first analysis runtime
 
