@@ -15,8 +15,12 @@ for public Scorecard publication; repository contents remain read-only.
 Pull requests cannot trigger this workflow.
 
 The workflow retains `results.sarif` in `scorecard-<full-commit>` for 30 days,
-uploads it to GitHub code scanning under `openssf-scorecard` and publishes
-public Scorecard results. Low scores and posture findings remain visible in
+uploads it to GitHub code scanning and publishes public Scorecard results.
+Scorecard embeds the categories `supply-chain/branch-protection`,
+`supply-chain/local` and `supply-chain/online-scm` in its SARIF. These take
+precedence over the upload step's `openssf-scorecard` fallback category;
+verify the actual categories, commit and findings in the analysis records.
+Low scores and posture findings remain visible in
 the report; successful execution does not mean the repository has no
 findings. Execution/signing, SARIF ingestion and missing-artifact errors fail
 the job. The upstream action treats exhausted public API upload retries as
