@@ -26,6 +26,12 @@ import {
   type Evidence,
 } from '@wsa/schemas';
 import { z } from 'zod';
+import {
+  challengeClaim,
+  ProviderResponseMetadataSchema,
+  type ClaimChallengeAttempt,
+  type CompletedProviderRun,
+} from './challenge.js';
 import { ClaimExtractionOutputSchema } from './extraction-schema.js';
 import { generateUlid } from './ulid.js';
 
@@ -76,7 +82,7 @@ export interface ExtractionInput {
 }
 
 export interface ExtractionAuditRecord {
-  readonly action: 'claim.extracted' | 'evidence.linked';
+  readonly action: 'claim.extracted' | 'evidence.linked' | 'claim.challenged';
   readonly actor: AgentId;
   readonly at: string;
   readonly detail: Readonly<Record<string, unknown>>;
@@ -88,6 +94,8 @@ export interface ExtractedClaimRecord {
   readonly evidence: EvidenceWithProvenance;
   readonly promotion: PromotionDecision;
   readonly auditTrail: ReadonlyArray<ExtractionAuditRecord>;
+  readonly providerRuns?: ReadonlyArray<CompletedProviderRun>;
+  readonly challenge?: ClaimChallengeAttempt;
 }
 
 export interface ExtractionResult {
@@ -108,6 +116,7 @@ export interface EvidenceEngine {
 
 export interface EvidenceEngineConfig {
   readonly provider: ModelProvider;
+  readonly challengeProvider?: ModelProvider;
   readonly actorId?: AgentId;
   readonly extractorId?: ClaimExtractor;
   readonly now?: () => Date;
@@ -115,6 +124,7 @@ export interface EvidenceEngineConfig {
 }
 
 export interface XaiEvidenceEngineConfig extends XaiProviderConfig {
+  readonly challengeProvider?: ModelProvider;
   readonly actorId?: AgentId;
   readonly extractorId?: ClaimExtractor;
   readonly now?: () => Date;
@@ -129,6 +139,9 @@ export function createEvidenceEngine(
       extractClaimsWithProvider({
         provider: config.provider,
         input,
+        ...(config.challengeProvider === undefined
+          ? {}
+          : { challengeProvider: config.challengeProvider }),
         ...(config.actorId === undefined ? {} : { actorId: config.actorId }),
         ...(config.extractorId === undefined
           ? {}
@@ -142,9 +155,17 @@ export function createEvidenceEngine(
 export function createXaiEvidenceEngine(
   config: XaiEvidenceEngineConfig,
 ): EvidenceEngine {
-  const { actorId, extractorId, now, createId, ...providerConfig } = config;
+  const {
+    actorId,
+    extractorId,
+    now,
+    createId,
+    challengeProvider,
+    ...providerConfig
+  } = config;
   return createEvidenceEngine({
     provider: createXaiProvider(providerConfig),
+    ...(challengeProvider === undefined ? {} : { challengeProvider }),
     ...(actorId === undefined ? {} : { actorId }),
     ...(extractorId === undefined ? {} : { extractorId }),
     ...(now === undefined ? {} : { now }),
@@ -154,6 +175,7 @@ export function createXaiEvidenceEngine(
 
 export async function extractClaimsWithProvider(args: {
   readonly provider: ModelProvider;
+  readonly challengeProvider?: ModelProvider;
   readonly input: ExtractionInput;
   readonly actorId?: AgentId;
   readonly extractorId?: ClaimExtractor;
@@ -168,6 +190,11 @@ export async function extractClaimsWithProvider(args: {
   const schema = ClaimExtractionOutputSchema({
     maxClaims: input.maxClaims ?? DEFAULT_MAX_CLAIMS,
   });
+  const providerId = args.provider.id;
+  const challengeProviderId = args.challengeProvider?.id;
+  if (challengeProviderId === providerId) {
+    throw new Error('challenge provider must differ from analysis provider');
+  }
   const response = await args.provider.complete({
     schema,
     messages: buildMessages(input),
@@ -178,37 +205,63 @@ export async function extractClaimsWithProvider(args: {
   });
 
   const occurredAt = now().toISOString();
-  const items = response.value.claims.map((candidate) =>
-    buildExtractedClaimRecord({
-      requestId: input.requestId,
-      sourceRef: input.sourceRef,
-      sourceUrl: input.sourceUrl,
-      sourceSha256: input.sourceSha256,
-      sourceFetchedAt: input.sourceFetchedAt,
-      candidate,
-      actorId,
-      extractorId,
-      occurredAt,
-      providerId: response.provider,
-      model: response.model,
-      createId,
-      ...(response.responseId === undefined
-        ? {}
-        : { responseId: response.responseId }),
-    }),
-  );
+  const metadata = ProviderResponseMetadataSchema.safeParse(response);
+  if (!metadata.success) {
+    throw new Error('analysis response metadata is invalid');
+  }
+  if (metadata.data.provider !== providerId) {
+    throw new Error(
+      'analysis response provider does not match configured provider',
+    );
+  }
+  const output = schema.parse(response.value);
+  const items: ExtractedClaimRecord[] = [];
+  for (const candidate of output.claims) {
+    items.push(
+      await buildExtractedClaimRecord({
+        requestId: input.requestId,
+        sourceRef: input.sourceRef,
+        sourceUrl: input.sourceUrl,
+        sourceSha256: input.sourceSha256,
+        sourceFetchedAt: input.sourceFetchedAt,
+        candidate,
+        actorId,
+        extractorId,
+        occurredAt,
+        providerId,
+        model: metadata.data.model,
+        createId,
+        sourceText: input.sourceText,
+        analysisCompleted:
+          metadata.data.status === 'completed' &&
+          metadata.data.rawFinishReason !== 'length' &&
+          metadata.data.rawFinishReason !== 'content_filter',
+        rawFinishReason: metadata.data.rawFinishReason,
+        now,
+        maxOutputTokens: input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(args.challengeProvider === undefined
+          ? {}
+          : { challengeProvider: args.challengeProvider }),
+        ...(challengeProviderId === undefined ? {} : { challengeProviderId }),
+        ...(metadata.data.responseId === undefined
+          ? {}
+          : { responseId: metadata.data.responseId }),
+      }),
+    );
+  }
 
   return {
     requestId: input.requestId,
-    summary: response.value.summary,
+    summary: output.summary,
     provider: response.provider,
-    model: response.model,
-    ...(response.responseId === undefined
+    model: metadata.data.model,
+    ...(metadata.data.responseId === undefined
       ? {}
-      : { responseId: response.responseId }),
-    rawFinishReason: response.rawFinishReason,
-    status: response.status,
-    usage: response.usage,
+      : { responseId: metadata.data.responseId }),
+    rawFinishReason: metadata.data.rawFinishReason,
+    status: metadata.data.status,
+    usage: metadata.data.usage,
     items,
   };
 }
@@ -239,7 +292,7 @@ function buildMessages(
   ];
 }
 
-function buildExtractedClaimRecord(args: {
+async function buildExtractedClaimRecord(args: {
   readonly requestId: string;
   readonly sourceRef: ClaimSourceRef;
   readonly sourceUrl: string;
@@ -255,7 +308,15 @@ function buildExtractedClaimRecord(args: {
   readonly model: string;
   readonly responseId?: string;
   readonly createId: () => string;
-}): ExtractedClaimRecord {
+  readonly sourceText: string;
+  readonly analysisCompleted: boolean;
+  readonly rawFinishReason: string;
+  readonly challengeProvider?: ModelProvider;
+  readonly challengeProviderId?: ModelProvider['id'];
+  readonly maxOutputTokens: number;
+  readonly timeoutMs: number;
+  readonly now: () => Date;
+}): Promise<ExtractedClaimRecord> {
   const claimId = ClaimIdSchema.parse(args.createId());
   const requestedStatus = args.candidate.status;
   const provisionalClaim = ClaimSchema.parse({
@@ -291,13 +352,75 @@ function buildExtractedClaimRecord(args: {
     },
   };
 
+  const binding = {
+    claimId,
+    claimText: provisionalClaim.text,
+    sourceRef: args.sourceRef,
+    sourceSha256: args.sourceSha256.toLowerCase(),
+  };
+  const providerRuns: CompletedProviderRun[] = args.analysisCompleted
+    ? [
+        {
+          provider: args.providerId,
+          taskKind: 'analysis',
+          ...binding,
+          requestId: args.requestId,
+          model: args.model,
+          at: args.occurredAt,
+          rawFinishReason: args.rawFinishReason,
+          ...(args.responseId === undefined
+            ? {}
+            : { responseId: args.responseId }),
+        },
+      ]
+    : [];
+  let challenge: ClaimChallengeAttempt | undefined;
+  if (
+    args.challengeProvider !== undefined &&
+    args.challengeProviderId !== undefined &&
+    PROMOTABLE_STATUSES.has(requestedStatus)
+  ) {
+    const requestId = `${args.requestId}:challenge:${claimId}`;
+    challenge = args.analysisCompleted
+      ? await challengeClaim({
+          provider: args.challengeProvider,
+          providerId: args.challengeProviderId,
+          binding,
+          sourceText: args.sourceText,
+          requestId,
+          maxOutputTokens: args.maxOutputTokens,
+          timeoutMs: args.timeoutMs,
+          now: args.now,
+        })
+      : {
+          provider: args.challengeProviderId,
+          requestId,
+          at: args.now().toISOString(),
+          outcome: 'skipped',
+          reason: 'analysis-incomplete',
+        };
+    if (challenge.outcome === 'completed') {
+      providerRuns.push({
+        provider: args.challengeProviderId,
+        taskKind: 'challenge',
+        ...binding,
+        requestId,
+        model: challenge.model,
+        at: challenge.at,
+        rawFinishReason: challenge.rawFinishReason,
+        ...(challenge.responseId === undefined
+          ? {}
+          : { responseId: challenge.responseId }),
+      });
+    }
+  }
+
   const promotion = checkEvidencePromotion({
     claim: provisionalClaim,
     claimProducerProvider: args.providerId,
     evidence: [evidenceWithProvenance],
-    // TODO(ADR-0003): pass real analysis/challenge provider runs once challenge-lane orchestration exists.
-    providerRuns: [],
-    now: args.occurredAt,
+    providerRuns,
+    now: challenge?.at ?? args.occurredAt,
   });
   const effectiveStatus = shouldDowngradeStatus(requestedStatus, promotion)
     ? SAFE_FALLBACK_STATUS
@@ -316,20 +439,61 @@ function buildExtractedClaimRecord(args: {
     claim,
     evidence: evidenceWithProvenance,
     promotion,
-    auditTrail: buildAuditTrail({
-      actorId: args.actorId,
-      occurredAt: args.occurredAt,
-      requestId: args.requestId,
-      sourceRef: args.sourceRef,
-      requestedStatus,
-      effectiveStatus,
-      claim,
-      evidence,
-      promotion,
-      providerId: args.providerId,
-      model: args.model,
-      ...(args.responseId === undefined ? {} : { responseId: args.responseId }),
-    }),
+    providerRuns,
+    ...(challenge === undefined ? {} : { challenge }),
+    auditTrail: [
+      ...buildAuditTrail({
+        actorId: args.actorId,
+        occurredAt: args.occurredAt,
+        requestId: args.requestId,
+        sourceRef: args.sourceRef,
+        requestedStatus,
+        effectiveStatus,
+        claim,
+        evidence,
+        promotion,
+        providerId: args.providerId,
+        model: args.model,
+        ...(args.responseId === undefined
+          ? {}
+          : { responseId: args.responseId }),
+      }),
+      ...(challenge === undefined
+        ? []
+        : [
+            {
+              action: 'claim.challenged' as const,
+              actor: args.actorId,
+              at: challenge.at,
+              detail: {
+                requestId: challenge.requestId,
+                claimId,
+                sourceRef: args.sourceRef,
+                sourceSha256: binding.sourceSha256,
+                provider: challenge.provider,
+                outcome: challenge.outcome,
+                ...(challenge.outcome === 'completed'
+                  ? { supports: challenge.assessment.supports }
+                  : { reason: challenge.reason }),
+                ...(challenge.model === undefined
+                  ? {}
+                  : { model: challenge.model }),
+                ...(challenge.responseId === undefined
+                  ? {}
+                  : { responseId: challenge.responseId }),
+                ...(challenge.responseStatus === undefined
+                  ? {}
+                  : { responseStatus: challenge.responseStatus }),
+                ...(challenge.rawFinishReason === undefined
+                  ? {}
+                  : { rawFinishReason: challenge.rawFinishReason }),
+                ...(challenge.usage === undefined
+                  ? {}
+                  : { usage: challenge.usage }),
+              },
+            },
+          ]),
+    ],
   };
 }
 
@@ -343,7 +507,9 @@ function buildEvidenceNote(args: {
     `Model-generated extraction candidate from ${args.providerId}/${args.model}.`,
     `requestId=${args.requestId}.`,
     args.candidate.rationale.trim(),
-  ].join(' ');
+  ]
+    .join(' ')
+    .slice(0, 500);
 }
 
 function shouldDowngradeStatus(

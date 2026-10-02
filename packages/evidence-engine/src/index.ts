@@ -11,6 +11,12 @@ export {
   createXaiEvidenceEngine,
   extractClaimsWithProvider,
 } from './lib/runtime.js';
+export { ClaimChallengeAssessmentSchema } from './lib/challenge.js';
+export type {
+  ClaimChallengeAssessment,
+  ClaimChallengeAttempt,
+  CompletedProviderRun,
+} from './lib/challenge.js';
 export type {
   ExtractionAuditRecord,
   ExtractionInput,
