@@ -18,7 +18,10 @@ The workflow retains `results.sarif` in `scorecard-<full-commit>` for 30 days,
 uploads it to GitHub code scanning under `openssf-scorecard` and publishes
 public Scorecard results. Low scores and posture findings remain visible in
 the report; successful execution does not mean the repository has no
-findings. Execution, publication and missing-artifact errors fail the job.
+findings. Execution/signing, SARIF ingestion and missing-artifact errors fail
+the job. The upstream action treats exhausted public API upload retries as
+a warning, so a successful job does not prove public API publication. Inspect
+the publication logs and public API result separately when verifying rollout.
 
 The action is pinned to its reviewed v2.4.4 commit. Its upstream implementation
 uses the `ghcr.io/ossf/scorecard-action:v2.4.4` container tag; the transitive
