@@ -30,6 +30,43 @@ counts and locations before calling it an execution regression. Triage
 findings under [#22](https://github.com/witness-south-africa/movement-os/issues/22).
 Do not discard rules or add blanket exclusions to make the status green.
 
+## CodeQL security analysis
+
+The source-owned `CodeQL security` workflow complements required Semgrep.
+It scans JavaScript/TypeScript, Python and GitHub Actions with GitHub's
+[`security-extended` suite](https://docs.github.com/en/code-security/concepts/code-scanning/codeql/codeql-query-suites)
+on every PR targeting main, every main push and weekly. Interpreted-language
+extraction uses `build-mode: none`, without project installation or build
+commands. Dependencies and generated sources unavailable to extraction can
+limit analysis. The actions are SHA-pinned; record the actual CLI/query-pack
+versions from each run because the action manages its tooling separately.
+
+Only the analysis jobs grant `security-events: write`; workflow defaults
+are read-only and checkout does not persist credentials. The workflow uses
+ordinary `pull_request`, never privileged PR-target execution. Independent
+language jobs continue if another language fails. Upload waits for code
+scanning processing, with separate stable `security/codeql/<language>`
+categories. Inspect actual extraction/query execution, source revision,
+analysis errors and CodeQL alerts: a successful upload can contain findings.
+For PR scans, bind the analyzed test-merge revision to the reviewed PR head
+and base; main analyses must name the landed commit.
+
+The dynamic `CodeQL - Code Quality` workflow is a separate service and does
+not establish execution of this security workflow. Live CodeQL default
+setup was `not-configured` before this source rollout; advanced setup is
+owned by the checked-in workflow. Existing nine required checks, including
+findings-failing Semgrep, remain the merge policy. A new CodeQL requirement
+would need a separate reviewed promotion and live-settings proof.
+
+Scorecard's current SAST detector recognizes checked-in CodeQL `analyze`
+and selected application providers, but not Semgrep CLI or ordinary
+`github-actions` checks. Its [implementation and scoring](https://github.com/ossf/scorecard/blob/c395761df6afe1a69e476bc60a013a94bcbc153f/checks/evaluation/sast.go)
+combine configuration with recognized scan history for recent merged PRs.
+Adding a genuine workflow does not repair historical coverage. Verify fresh
+Scorecard/SARIF and the live posture alert independently; keep historical
+limitations explicit even if the alert closes. Track remaining work in
+[#22](https://github.com/witness-south-africa/movement-os/issues/22).
+
 ## Required-check rollout
 
 The intended `main-protection` policy requires `semgrep`, `gitleaks`,
