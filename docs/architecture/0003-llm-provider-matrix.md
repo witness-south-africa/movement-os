@@ -99,12 +99,20 @@ construct the runtime that invokes it. The first real consumer is
 structured claim extraction and immediately runs the promotion gate
 before returning results.
 
-The extraction runtime currently passes `providerRuns: []` to the gate.
-It does not dispatch a second provider. The gate's distinct-provider
-challenge requirement already exists, and blocked `high-confidence` or
-`conclusive` requests are downgraded to `contested`. Callers of the gate
-must supply claim-bound provider-run evidence; live challenge orchestration
-remains implementation work.
+The evidence engine supports an optional injected `challengeProvider`.
+For each requested `high-confidence` or `conclusive` candidate from completed
+analysis, it dispatches a different provider in the `challenge` lane. The
+response must bind to the exact generated claim and supplied source metadata;
+only locally validated, completed, identity-matched responses generate
+challenge-run evidence. Missing or failed challenge calls leave R7 blocking
+promotion. The original extraction evidence remains unchanged, so successful
+completion satisfies only the challenge-run rule, not primary-source or
+supporting-provenance requirements. Blocked candidates remain `contested`.
+
+The [engine documentation](../../packages/evidence-engine/README.md#optional-challenge-provider)
+records request bounds, reported costs and trust limits. The extract Worker
+does not enable a challenger. Shared routing, remaining adapters and
+version-linked deployed challenge acceptance remain delivery work.
 
 ### Analysis workloads
 
@@ -211,7 +219,7 @@ Rollout has now partially landed:
    - `@wsa/agent-anthropic` parity adapter
    - local / self-hosted adapter
    - deployment-level routing config + audit-log integration
-   - challenge-lane orchestration above the first analysis runtime
+   - deployment wiring and runtime acceptance of the optional challenge lane
 
 ## References
 

@@ -4,6 +4,11 @@ Implement the named slice and validate its behavior. Inspect the actual
 worktree and source before editing. Preserve unrelated changes and use
 an isolated worktree for implementation.
 
+After creating the worktree, set it explicitly as the working directory for
+intake, dependency setup, validation and edits. A failed intake or setup
+must halt dependent commands; do not continue an installation in the
+original checkout after a worktree preflight fails.
+
 Record base/head SHA, files in scope and acceptance criteria. Infer routine
 details from the issue and session; ask when ambiguity would change the
 scope. Make the smallest coherent change and run the checks appropriate
