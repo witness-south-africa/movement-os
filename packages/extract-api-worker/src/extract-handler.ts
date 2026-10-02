@@ -194,10 +194,12 @@ export async function handleExtractRequest(
 
 export function createFetchXaiClient(env: Env): XaiClient {
   const apiKey = readRequiredString(env.XAI_API_KEY, 'XAI_API_KEY');
-  const baseUrl = (env.XAI_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(
-    /\/+$/,
-    '',
-  );
+  const configuredBaseUrl = env.XAI_API_BASE_URL ?? DEFAULT_API_BASE_URL;
+  let end = configuredBaseUrl.length;
+  while (end > 0 && configuredBaseUrl[end - 1] === '/') {
+    end -= 1;
+  }
+  const baseUrl = configuredBaseUrl.slice(0, end);
 
   return {
     chat: {
