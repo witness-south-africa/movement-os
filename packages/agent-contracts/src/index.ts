@@ -7,3 +7,4 @@ export * from './lib/response.js';
 export * from './lib/complete-args.js';
 export * from './lib/model-provider.js';
 export * from './lib/fake-provider.js';
+export * from './lib/provider-routing.js';

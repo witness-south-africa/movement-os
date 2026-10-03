@@ -12,6 +12,8 @@ Thin orchestration layer for the first real xAI runtime path in
 - converts model output into typed `Claim` and `Evidence` records
 - optionally dispatches a distinct `challengeProvider` for each requested
   `high-confidence` or `conclusive` claim, with claim/source-bound results
+- offers opt-in `createRoutedEvidenceEngine()` with validated shared lane config
+  and separately constructed adapters
 - immediately runs `checkEvidencePromotion()` on every extracted claim
 - downgrades model-requested `high-confidence` / `conclusive` claims to
   `contested` when the promotion gate blocks them
@@ -71,6 +73,42 @@ identity remains in the run metadata.
 The extract Worker does not configure this option or expose run input through
 the request envelope. Source tests use offline transports; deployed adoption
 and paid provider acceptance need version-linked runtime proof.
+
+## Configured provider routing
+
+`createRoutedEvidenceEngine()` selects analysis and challenge providers using
+the shared version-1 config in `@wsa/agent-contracts`:
+
+```ts
+const engine = createRoutedEvidenceEngine({
+  routing: routingConfig,
+  providers: { xai: xaiProvider, openai: openaiProvider },
+});
+const result = await engine.extractClaims(input);
+```
+
+The [secret-free JSON example](../../config/provider-routing.example.json)
+selects xAI analysis and OpenAI challenge. Operators load and pass their own
+configuration; the factory does not read files, environment variables or
+credentials. Reverse pairing and other known provider IDs are configurable,
+but both real adapters must be injected and distinct. Reserved Anthropic/local
+IDs do not install their missing repository adapters.
+
+Construction validates the complete config and both adapters before any call.
+Before every extraction, the factory checks both selected adapters' identity
+and callability, then delegates to `createEvidenceEngine()`. Invalid config,
+missing adapters or drift fail without analysis dispatch, fallback or provider
+substitution. Parsed routes and selected instances are snapshots: construct
+a new engine to apply config or registry changes.
+
+Version 1 keeps `sensitive-intake` explicitly disabled. The engine still accepts
+only already-redacted / already-consented analysis material under its existing
+caller contract; routing does not inspect or classify that material. Existing
+factories and Worker wiring retain their current behavior. Challenge completion,
+claim/source binding, reported usage, failure containment and promotion guards
+are the same as the optional challenger path above. Operator policy, adapter
+credentials/models/budgets, deployment adoption and live provider acceptance
+remain separate requirements.
 
 ## Building
 
