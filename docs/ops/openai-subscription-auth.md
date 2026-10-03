@@ -133,9 +133,13 @@ a previous account's model choice or access-token snapshot as an authorization
 decision. The resolver reads the active registration on each call.
 
 The example constructs a provider; it makes no inference request. Subscription
-preview rejects output caps. Both evidence-engine lanes currently require caps and
-therefore remain on API mode. This account module does not remove those ceilings,
-wire the extract Worker, enable sensitive intake or provide API billing fallback.
+preview rejects output caps. Evidence-engine defaults retain caps and API mode;
+its explicit [subscription output policy](../../packages/evidence-engine/README.md#openai-subscription-output-policy)
+permits one declared subscription lane after accepting uncapped output. Requests
+with an explicit global cap still reject before dispatch. The account module
+does not select that policy, wire the extract Worker, enable sensitive intake or
+provide API billing fallback. Live engine adoption remains a separate acceptance
+step.
 
 ## Authorization and identity
 

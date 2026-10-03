@@ -1,7 +1,7 @@
 # @wsa/evidence-engine
 
-Thin orchestration layer for the first real xAI runtime path in
-`movement-os`.
+Structured claim extraction through injected providers, with optional
+claim-bound challenge calls. The default Worker uses the xAI factory.
 
 ## What it does
 
@@ -114,6 +114,59 @@ claim/source binding, reported usage, failure containment and promotion guards
 are the same as the optional challenger path above. Operator policy, adapter
 credentials/models/budgets, deployment adoption and live provider acceptance
 remain separate requirements.
+
+## OpenAI subscription output policy
+
+Engine calls retain a default output cap of 900 tokens. API requests still
+forward the caller's `maxOutputTokens` to both lanes. OpenAI's subscription
+preview cannot accept an output cap, so subscription use needs an explicit
+factory policy for its selected lane:
+
+```ts
+const engine = createRoutedEvidenceEngine({
+  routing: routingConfig, // xAI analysis, OpenAI challenge
+  providers: { xai: xaiProvider, openai: openAiSubscriptionProvider },
+  subscriptionPolicy: { lane: 'challenge', allowUncappedOutput: true },
+});
+// Omit maxOutputTokens: a supplied global cap conflicts with this policy.
+const result = await engine.extractClaims(inputWithoutOutputCap);
+```
+
+The same option works in `createEvidenceEngine()`, `extractClaimsWithProvider()`
+and the xAI factory when its challenger uses subscriptions. `lane: 'analysis'`
+permits OpenAI subscription analysis with a distinct capped challenger. Policy
+parsing is strict and requires `allowUncappedOutput: true`; it is not inferred
+from credentials, provider IDs or a failed API request. Construction requires
+the selected adapter to declare `id: 'openai'` and `accessMode: 'subscription'`.
+OpenAI API and subscription modes remain one vendor for R7.
+
+The policy removes the output-cap field only from that subscription lane. The
+other lane keeps its 900-token default. A supplied `maxOutputTokens` rejects
+the whole extraction before either call, rather than silently dropping a hard
+ceiling. Both lanes retain the input timeout (20 seconds by default, at most
+120 seconds per call), claim count (at most ten), sequential challenges and no
+retry or billing fallback. Native Responses byte/event bounds still apply;
+local cancellation and resource limits do not guarantee an upstream token,
+plan-usage or monetary ceiling. This policy explicitly accepts that limitation.
+[Official preview requirements](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+
+Configuration and selected instances are snapshots; construct a new engine to
+change them. With a subscription policy, both adapters' IDs, declared modes and
+completion functions are checked before dispatch and after each awaited call.
+Binding drift rejects the extraction and prevents later calls. The subscription
+response must also report that mode: an analysis mismatch rejects extraction;
+a challenge mismatch records failure and retains R7. Optional reported access
+mode is preserved in results, completed runs and audit details, without
+inventing a mode for adapters that do not report one.
+
+Subscription challenge quota exhaustion records a finite `quota-exhausted`
+failure, then skips later promotable challenges in that extraction with
+`subscription-quota-exhausted`. All affected claims retain R7. A new extraction
+starts fresh; API and calls without this policy retain their existing failure
+behavior. Failed calls may omit usage, so those observations do not prove zero
+consumption. No subscription quota, spend reservation or account eligibility is
+inferred. Source tests use offline fetch/SSE; live account, model and inference
+acceptance and Worker adoption remain pending.
 
 ## Building
 

@@ -22,12 +22,16 @@ export function createRoutedEvidenceEngine(
 ): EvidenceEngine {
   const { routing, providers, ...engineConfig } = config;
   const router = createProviderRouter({ config: routing, providers });
+  const engine = createEvidenceEngine({
+    ...engineConfig,
+    provider: router.resolve('analysis'),
+    challengeProvider: router.resolve('challenge'),
+  });
   return {
-    extractClaims: async (input) =>
-      createEvidenceEngine({
-        ...engineConfig,
-        provider: router.resolve('analysis'),
-        challengeProvider: router.resolve('challenge'),
-      }).extractClaims(input),
+    extractClaims: async (input) => {
+      router.resolve('analysis');
+      router.resolve('challenge');
+      return engine.extractClaims(input);
+    },
   };
 }
