@@ -32,6 +32,8 @@ export interface ModelResponse<T> {
   readonly usage: TokenUsage;
   readonly provider: LlmProviderId;
   readonly model: string;
+  /** Explicit access/billing mode when reported by an adapter; never inferred. */
+  readonly accessMode?: 'api' | 'subscription';
   readonly responseId?: string | undefined;
   readonly rawFinishReason: string;
   readonly status: ResponseStatus;

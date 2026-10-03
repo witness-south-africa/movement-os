@@ -10,7 +10,8 @@ satisfy, plus the Zod schemas that keep requests and responses honest.
 - `ModelProvider` — the single-function interface adapters implement.
 - `CompleteArgs<TSchema>` — narrow, schema-first call arguments.
 - `ModelResponse<T>` — normalized provider response including
-  `status`, `usage`, `model`, `responseId`, and `rawFinishReason`.
+  `status`, `usage`, `model`, `responseId`, and `rawFinishReason`, plus optional
+  explicit `accessMode` (`api` or `subscription`) when an adapter reports it.
 - `LlmProviderIdSchema` — identifier enum (`openai`, `xai`, `anthropic`,
   with `local` reserved for an outstanding repository adapter).
 - `AgentTaskKindSchema` — the three ADR-0003 routing lanes

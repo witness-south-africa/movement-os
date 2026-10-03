@@ -197,6 +197,9 @@ importers:
       '@wsa/agent-anthropic':
         specifier: workspace:*
         version: link:../agent-anthropic
+      '@wsa/agent-openai':
+        specifier: workspace:*
+        version: link:../agent-openai
 
   packages/extract-api-worker:
     dependencies:

@@ -24,6 +24,9 @@
       "path": "../agent-contracts/tsconfig.lib.json"
     },
     {
+      "path": "../agent-openai/tsconfig.lib.json"
+    },
+    {
       "path": "../agent-anthropic/tsconfig.lib.json"
     }
   ]

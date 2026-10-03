@@ -33,7 +33,11 @@ Three things force the decision:
 
 ### Shipped and reserved providers
 
-- `openai` — OpenAI API. Default adapter, already chosen in ADR-0001.
+- `openai` — injected Chat Completions and streaming Responses adapters.
+  Responses supports explicitly configured API or subscription access with a
+  fixed public-endpoint fetch transport. OAuth sign-in, verified grants and
+  credential storage remain caller-owned; subscription access is scoped to the
+  official local OSS/self-hosted flow. See the [adapter contract](../../packages/agent-openai/README.md).
 - `xai` — xAI (Grok) API. Added day one. xAI's API is OpenAI-
   compatible via `base_url="https://api.x.ai/v1"`, so the adapter
   is thin. Grok supports tool use, function calling, and schema-
@@ -84,6 +88,17 @@ The shipped contract is defined in
 a provider `id` and a generic `complete()` method whose response value is
 inferred from the caller's required Zod schema. There are no capability
 flags or residency guarantees on this interface.
+
+`ModelResponse` may report an explicit `accessMode`. Both OpenAI access modes
+retain provider ID `openai`; changing billing never satisfies the distinct-provider
+challenge requirement. Subscription preview rejects `max_output_tokens`, so the
+Responses adapter rejects calls with a hard output-token cap before dispatch.
+Both evidence-engine lanes always supply caps and therefore require API mode.
+Subscription exhaustion or unavailable usage throws a typed stop; no automatic
+API fallback, retry, credential loading or monetary accounting is shipped.
+Future fallback requires explicit authorization, a finite API cap and executable
+pre-dispatch spend reservation. Local stream byte/time limits do not establish a
+vendor token or spending ceiling.
 
 [`CompleteArgs`](../../packages/agent-contracts/src/lib/complete-args.ts)
 carries `schema`, `messages`, `taskKind`, optional tools, output-token and
@@ -239,6 +254,10 @@ Rollout has now partially landed:
 
 ## References
 
+- OpenAI [ChatGPT plan usage](https://developers.openai.com/siwc/token-sharing-open-source),
+  [Responses inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference),
+  [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+  and [quota recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
 - Anthropic native [Messages API](https://platform.claude.com/docs/en/api/messages/create)
   and [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
 - xAI API — OpenAI / Anthropic SDK compatibility and

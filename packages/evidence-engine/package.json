@@ -26,6 +26,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@wsa/agent-anthropic": "workspace:*"
+    "@wsa/agent-anthropic": "workspace:*",
+    "@wsa/agent-openai": "workspace:*"
   }
 }
