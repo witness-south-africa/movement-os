@@ -5,6 +5,10 @@ import type {
   ModelResponse,
 } from '@wsa/agent-contracts';
 import {
+  createAnthropicProvider,
+  type AnthropicMessageRequest,
+} from '@wsa/agent-anthropic';
+import {
   AgentIdSchema,
   ArtefactIdSchema,
   ClaimExtractorSchema,
@@ -115,6 +119,259 @@ function adapters(incompleteChallenge = false) {
     },
   };
 }
+
+function anthropicAdapter(
+  options: {
+    stopReason?: string;
+    invalidJson?: boolean;
+    wrongBinding?: boolean;
+    oversizedRationale?: boolean;
+    extraClaim?: boolean;
+  } = {},
+) {
+  const create = jest.fn((request: AnthropicMessageRequest) => {
+    const binding = JSON.parse(
+      request.messages.at(-1)?.content ?? '{}',
+    ) as Record<string, unknown>;
+    const candidate = {
+      text: TEXT,
+      status: 'conclusive',
+      supports: 'supports',
+      rationale: 'The supplied record describes a refusal.',
+    };
+    const value = Object.hasOwn(binding, 'claimId')
+      ? {
+          claimId: binding.claimId,
+          claimText: options.wrongBinding
+            ? 'A different claim about the supplied record.'
+            : binding.claimText,
+          sourceRef: binding.sourceRef,
+          sourceSha256: binding.sourceSha256,
+          supports: 'contradicts',
+          rationale: options.oversizedRationale
+            ? 'r'.repeat(501)
+            : 'The record does not establish the claimed conclusion.',
+        }
+      : {
+          summary: 'One extracted claim.',
+          claims: options.extraClaim ? [candidate, candidate] : [candidate],
+        };
+    return Promise.resolve({
+      id: 'anthropic-response',
+      type: 'message' as const,
+      role: 'assistant' as const,
+      model: 'claude-offline',
+      content: [
+        {
+          type: 'text' as const,
+          text: options.invalidJson ? '{invalid' : JSON.stringify(value),
+        },
+      ],
+      stop_reason: options.stopReason ?? 'end_turn',
+      stop_sequence: null,
+      usage: {
+        input_tokens: 13,
+        output_tokens: 7,
+        cache_creation_input_tokens: 3,
+        cache_read_input_tokens: 5,
+      },
+    });
+  });
+  return {
+    create,
+    provider: createAnthropicProvider({
+      client: { messages: { create } },
+      model: 'claude-selected',
+    }),
+  };
+}
+
+describe('Anthropic adapter in shared routing', () => {
+  it('runs the native adapter as a claim-bound challenger without changing primary evidence', async () => {
+    const xai = adapter('xai');
+    const anthropic = anthropicAdapter();
+    const result = await createRoutedEvidenceEngine({
+      routing: routing('xai', 'anthropic'),
+      providers: { xai: xai.provider, anthropic: anthropic.provider },
+      now: () => NOW,
+    }).extractClaims(input());
+    const item = result.items[0];
+    expect(xai.calls).toHaveLength(1);
+    expect(anthropic.create).toHaveBeenCalledTimes(1);
+    const request = anthropic.create.mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      model: 'claude-selected',
+      max_tokens: 321,
+      output_config: { format: { type: 'json_schema' } },
+    });
+    expect(request).not.toHaveProperty('metadata');
+    expect(JSON.parse(request?.messages.at(-1)?.content ?? '{}')).toEqual({
+      claimId: item?.claim.id,
+      claimText: TEXT,
+      sourceRef: input().sourceRef,
+      sourceSha256: input().sourceSha256,
+      sourceText: TEXT,
+    });
+    expect(item?.challenge).toMatchObject({
+      outcome: 'completed',
+      provider: 'anthropic',
+      model: 'claude-offline',
+      responseId: 'anthropic-response',
+      rawFinishReason: 'end_turn',
+      assessment: {
+        claimId: item?.claim.id,
+        claimText: TEXT,
+        sourceRef: input().sourceRef,
+        sourceSha256: input().sourceSha256,
+        supports: 'contradicts',
+      },
+      usage: {
+        inputTokens: 21,
+        outputTokens: 7,
+        totalTokens: 28,
+        cachedInputTokens: 5,
+      },
+    });
+    expect(item?.providerRuns?.map((run) => run.provider)).toEqual([
+      'xai',
+      'anthropic',
+    ]);
+    expect(item?.providerRuns?.[1]).toMatchObject({
+      requestId: `req-routing:challenge:${String(item?.claim.id)}`,
+      claimText: TEXT,
+      sourceRef: input().sourceRef,
+      sourceSha256: input().sourceSha256,
+    });
+    const reasons = item?.promotion.reasons.map((reason) => reason.code);
+    expect(reasons).not.toContain('R7');
+    expect(reasons).toEqual(expect.arrayContaining(['R2', 'R3', 'R4']));
+    expect(item?.claim.status).toBe('contested');
+    expect(item?.evidence.evidence.kind).toBe('other');
+    expect(item?.evidence.provenance).toEqual({
+      providerIds: ['xai'],
+      modelGenerated: true,
+    });
+    expect(result.usage.totalTokens).toBe(15);
+  });
+
+  it('uses the real extraction schema with native analysis and a distinct challenger', async () => {
+    const anthropic = anthropicAdapter();
+    const xai = adapter('xai');
+    const result = await createRoutedEvidenceEngine({
+      routing: routing('anthropic', 'xai'),
+      providers: { anthropic: anthropic.provider, xai: xai.provider },
+      now: () => NOW,
+    }).extractClaims(input());
+    expect(anthropic.create).toHaveBeenCalledTimes(1);
+    expect(xai.calls).toHaveLength(1);
+    expect(result.provider).toBe('anthropic');
+    expect(result.model).toBe('claude-offline');
+    expect(result.usage).toEqual({
+      inputTokens: 21,
+      outputTokens: 7,
+      totalTokens: 28,
+      cachedInputTokens: 5,
+    });
+    expect(result.items[0]?.challenge?.outcome).toBe('completed');
+    expect(result.items[0]?.evidence.provenance).toEqual({
+      providerIds: ['anthropic'],
+      modelGenerated: true,
+    });
+    const reasons = result.items[0]?.promotion.reasons.map(
+      (reason) => reason.code,
+    );
+    expect(reasons).not.toContain('R7');
+    expect(reasons).not.toContain('R2');
+    expect(reasons).toEqual(expect.arrayContaining(['R3', 'R4']));
+  });
+
+  it.each([
+    'max_tokens',
+    'stop_sequence',
+    'tool_use',
+    'pause_turn',
+    'refusal',
+    'model_context_window_exceeded',
+    'future_stop_reason',
+  ])('retains R7 for native challenger stop reason %s', async (stopReason) => {
+    const xai = adapter('xai');
+    const anthropic = anthropicAdapter({ stopReason });
+    const result = await createRoutedEvidenceEngine({
+      routing: routing('xai', 'anthropic'),
+      providers: { xai: xai.provider, anthropic: anthropic.provider },
+      now: () => NOW,
+    }).extractClaims(input());
+    expect(anthropic.create).toHaveBeenCalledTimes(1);
+    expect(result.items[0]?.challenge).toMatchObject({
+      outcome: 'failed',
+      reason: 'incomplete-response',
+      provider: 'anthropic',
+      rawFinishReason: stopReason,
+      responseStatus: 'incomplete',
+    });
+    expect(result.items[0]?.providerRuns).toHaveLength(1);
+    expect(result.items[0]?.claim.status).toBe('contested');
+    expect(
+      result.items[0]?.promotion.reasons.map((reason) => reason.code),
+    ).toContain('R7');
+  });
+
+  it.each([
+    [{ invalidJson: true }, 'provider-error'],
+    [{ oversizedRationale: true }, 'provider-error'],
+    [{ wrongBinding: true }, 'binding-mismatch'],
+  ] as const)(
+    'retains R7 for invalid native challenge output %j',
+    async (options, reason) => {
+      const xai = adapter('xai');
+      const anthropic = anthropicAdapter(options);
+      const result = await createRoutedEvidenceEngine({
+        routing: routing('xai', 'anthropic'),
+        providers: { xai: xai.provider, anthropic: anthropic.provider },
+        now: () => NOW,
+      }).extractClaims(input());
+      expect(result.items[0]?.challenge).toMatchObject({
+        outcome: 'failed',
+        reason,
+      });
+      expect(result.items[0]?.providerRuns).toHaveLength(1);
+      expect(
+        result.items[0]?.promotion.reasons.map((entry) => entry.code),
+      ).toContain('R7');
+    },
+  );
+
+  it('still rejects extraction beyond the original claim cap after wire-schema normalization', async () => {
+    const anthropic = anthropicAdapter({ extraClaim: true });
+    const xai = adapter('xai');
+    const engine = createRoutedEvidenceEngine({
+      routing: routing('anthropic', 'xai'),
+      providers: { anthropic: anthropic.provider, xai: xai.provider },
+      now: () => NOW,
+    });
+    await expect(engine.extractClaims(input())).rejects.toThrow();
+    expect(anthropic.create).toHaveBeenCalledTimes(1);
+    expect(xai.calls).toHaveLength(0);
+  });
+
+  it('skips challenge calls when native analysis is incomplete', async () => {
+    const anthropic = anthropicAdapter({ stopReason: 'max_tokens' });
+    const xai = adapter('xai');
+    const result = await createRoutedEvidenceEngine({
+      routing: routing('anthropic', 'xai'),
+      providers: { anthropic: anthropic.provider, xai: xai.provider },
+      now: () => NOW,
+    }).extractClaims(input());
+    expect(xai.calls).toHaveLength(0);
+    expect(result.items[0]?.challenge).toMatchObject({
+      outcome: 'skipped',
+      reason: 'analysis-incomplete',
+    });
+    expect(
+      result.items[0]?.promotion.reasons.map((reason) => reason.code),
+    ).toContain('R7');
+  });
+});
 
 describe('createRoutedEvidenceEngine', () => {
   it.each([

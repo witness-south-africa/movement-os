@@ -24,5 +24,8 @@
     "@wsa/schemas": "workspace:*",
     "tslib": "^2.3.0",
     "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@wsa/agent-anthropic": "workspace:*"
   }
 }
