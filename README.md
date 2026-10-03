@@ -56,8 +56,10 @@ This sentence is the platform's public API. It is pinned in
     test doubles for analysis/challenge adapters.
   - `@wsa/agent-openai` — injected Chat Completions and streaming Responses
     adapters. Responses has explicit API/subscription access modes and an
-    optional fixed-endpoint fetch transport; sign-in and budget fallback remain
-    caller-owned. Subscription rejects hard output-token caps.
+    optional fixed-endpoint fetch transport. A separate Node entry provides
+    subscription sign-in, verified accounts, protected Unix storage and refresh;
+    callers supply operator UI, and budget fallback remains planned.
+    Subscription rejects hard output-token caps.
   - `@wsa/agent-xai` — in-repo provider adapter package with budget,
     telemetry, and prompt-shaping helpers for internal runtime wiring.
   - `@wsa/agent-anthropic` — injected native Messages adapter with structured

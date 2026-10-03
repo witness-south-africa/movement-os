@@ -21,11 +21,13 @@ credentials for its selected account. API resolvers return an explicitly tagged
 `OpenAiApiCredential`. Subscription resolvers return
 `OpenAiSubscriptionCredential` with `planUsageAuthorized:true`. The tag/grant is
 a trusted caller assertion, not token inspection or independent authentication.
-The caller must complete official registration, validate signed identity and the
-`chatgpt.tokens.use.direct` grant, protect stored credentials, serialize refresh
-and choose a model available to the selected account. This package does not ship
-sign-in UX, token exchange/verification/storage, account selection or model catalog
-loading. Do not substitute browser cookies or local Codex tokens for that flow.
+The separate Node-only `@wsa/agent-openai/subscription-auth` entry provides official
+registration and loopback sign-in, signed identity/grant verification, a protected
+Unix store, serialized refresh, account selection, model catalog loading and
+sign-out. See the [operator integration guide](../../docs/ops/openai-subscription-auth.md).
+The caller supplies its browser opener, account menu and model chooser. An injected
+resolver or custom store remains a trusted integration boundary. Do not substitute
+browser cookies or local Codex tokens for the official flow.
 
 Subscription construction requires explicit `hosting:'local' | 'self-hosted'`.
 This identifies the supported integration scope; it does not inspect the actual

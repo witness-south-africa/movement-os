@@ -7,6 +7,11 @@
   "types": "./dist/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
+    "./subscription-auth": {
+      "types": "./dist/subscription-auth.d.ts",
+      "import": "./dist/subscription-auth.js",
+      "default": "./dist/subscription-auth.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
@@ -19,6 +24,7 @@
   ],
   "dependencies": {
     "@wsa/agent-contracts": "workspace:*",
+    "jose": "6.2.12",
     "tslib": "^2.3.0",
     "zod": "^3.24.0",
     "zod-to-json-schema": "^3.23.5"
