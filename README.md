@@ -57,8 +57,9 @@ This sentence is the platform's public API. It is pinned in
   - `@wsa/agent-openai` — injected Chat Completions and streaming Responses
     adapters. Responses has explicit API/subscription access modes and an
     optional fixed-endpoint fetch transport. A separate Node entry provides
-    subscription sign-in, verified accounts, protected Unix storage and refresh;
-    callers supply operator UI, and budget fallback remains planned.
+    subscription sign-in, verified accounts, protected Unix storage and refresh.
+    A [terminal account manager](docs/ops/openai-subscription-auth.md) provides
+    account operations and model listing; budget fallback remains planned.
     Subscription rejects hard output-token caps.
   - `@wsa/agent-xai` — in-repo provider adapter package with budget,
     telemetry, and prompt-shaping helpers for internal runtime wiring.

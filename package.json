@@ -11,6 +11,7 @@
     "pnpm": "10.34.6"
   },
   "scripts": {
+    "openai:accounts": "node packages/agent-openai/dist/operator-cli.js",
     "preinstall": "node scripts/verify-package-manager.mjs",
     "build": "nx run-many -t build",
     "test": "nx run-many -t test",
