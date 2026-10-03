@@ -1,7 +1,8 @@
 # @wsa/agent-contracts
 
 Provider-agnostic contracts for LLM access. Defines the `ModelProvider`
-interface every adapter (`@wsa/agent-openai`, `@wsa/agent-xai`, ...) must
+interface every adapter (`@wsa/agent-openai`, `@wsa/agent-xai`,
+`@wsa/agent-anthropic`, ...) must
 satisfy, plus the Zod schemas that keep requests and responses honest.
 
 ## What it contains
@@ -10,8 +11,8 @@ satisfy, plus the Zod schemas that keep requests and responses honest.
 - `CompleteArgs<TSchema>` — narrow, schema-first call arguments.
 - `ModelResponse<T>` — normalized provider response including
   `status`, `usage`, `model`, `responseId`, and `rawFinishReason`.
-- `LlmProviderIdSchema` — identifier enum (`openai`, `xai`, plus
-  `anthropic` and `local` reserved).
+- `LlmProviderIdSchema` — identifier enum (`openai`, `xai`, `anthropic`,
+  with `local` reserved for an outstanding repository adapter).
 - `AgentTaskKindSchema` — the three ADR-0003 routing lanes
   (`sensitive-intake`, `analysis`, `challenge`).
 - `AgentMessageSchema` — narrow conversation message (role + content).
@@ -88,8 +89,9 @@ resolving it throws without fallback, even if a local adapter is injected.
 Enabling that lane needs its own policy and implementation slice. A provider
 ID does not prove an installed adapter: both configured adapters must be own
 registry entries, with matching IDs and callable `complete`, before the router
-is returned. Reserved IDs can select externally supplied adapters; their
-repository implementations remain outstanding.
+is returned. The shipped Anthropic adapter can be deliberately supplied through
+the same registry. The reserved local ID can select an externally supplied
+adapter; its repository implementation remains outstanding.
 
 The router snapshots and freezes parsed config and preserves selected adapter
 instances. Changing the caller's config or registry does not reroute an existing

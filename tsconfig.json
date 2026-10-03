@@ -35,6 +35,9 @@
     },
     {
       "path": "./packages/extract-api-worker"
+    },
+    {
+      "path": "./packages/agent-anthropic"
     }
   ]
 }

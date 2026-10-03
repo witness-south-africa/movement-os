@@ -39,8 +39,11 @@ Three things force the decision:
   is thin. Grok supports tool use, function calling, and schema-
   constrained structured outputs, which matches the platform's
   extraction and drafting workloads.
-- `anthropic` — reserved provider ID for a future Claude adapter; no
-  adapter package is shipped.
+- `anthropic` — native Messages adapter in `@wsa/agent-anthropic`, with
+  injected transport, structured JSON, local schema validation, bounded
+  output tokens and abort signals. Its source can be deliberately injected
+  into analysis/challenge routing; Worker adoption and live acceptance remain
+  pending. It does not enable sensitive intake or establish data-handling terms.
 - `local` — reserved provider ID for a future local / self-hosted
   adapter; no adapter package is shipped.
 
@@ -204,8 +207,7 @@ The same principle applies to OpenAI and Anthropic. See
 
 **Negative / costs.**
 
-- Two adapters to maintain from day one, three when `anthropic` is
-  wired in, four when `local` is.
+- Three source adapters to maintain; a fourth when `local` is implemented.
 - Small extra latency and cost per promotion (challenge lane).
 - Operators must provide routing config and constructed adapters rather than
   get an automatically enabled defaults-only experience.
@@ -217,7 +219,10 @@ Rollout has now partially landed:
 1. `@wsa/agent-contracts` — `ModelProvider` interface, `AgentTaskKind`,
    `ModelResponse<T>`.
 2. `@wsa/agent-openai` and `@wsa/agent-xai` — shipped adapters;
-   xAI includes telemetry / budget controls.
+   xAI includes telemetry / budget controls. `@wsa/agent-anthropic` ships
+   the native Messages source adapter with deterministic injected-client
+   tests. Its normalized usage includes native cache-write/read counters;
+   it does not calculate spend or install a budget/telemetry service.
 3. Guardrails rules in
    `packages/guardrails/src/lib/evidence-gate.ts`: promotion to
    `conclusive` / `high-confidence` requires supporting evidence from
@@ -227,13 +232,15 @@ Rollout has now partially landed:
    consuming `@wsa/agent-xai` and immediately applying the promotion
    gate before returning audit-ready output.
 5. Remaining follow-ups:
-   - `@wsa/agent-anthropic` parity adapter
    - local / self-hosted adapter
+   - reviewed sensitive-intake policy and enablement
    - operator-owned deployment routing configuration and audit-log integration
    - deployment wiring and runtime acceptance of the optional challenge lane
 
 ## References
 
+- Anthropic native [Messages API](https://platform.claude.com/docs/en/api/messages/create)
+  and [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
 - xAI API — OpenAI / Anthropic SDK compatibility and
   `base_url` quickstart.
 - xAI — function calling, structured outputs, reasoning features.

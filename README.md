@@ -58,6 +58,9 @@ This sentence is the platform's public API. It is pinned in
     provider wiring and JSON-schema/finish-reason helpers.
   - `@wsa/agent-xai` — in-repo provider adapter package with budget,
     telemetry, and prompt-shaping helpers for internal runtime wiring.
+  - `@wsa/agent-anthropic` — injected native Messages adapter with structured
+    output, local schema validation and token accounting. Runtime adoption
+    requires deliberate operator wiring.
   - `@wsa/email-ingress-worker` — Cloudflare Email Worker that writes inbound
     alias traffic to R2 per ADR-0006.
   - `@wsa/email-probe` — machine-only SMTP-to-R2 probe harness for verifying
@@ -106,7 +109,7 @@ working surfaces at this SHA:
 - no `apps/api`
 - no `apps/cli`
 - no `docs/threat-model/`
-- no Anthropic adapter package yet
+- no local-inference adapter package yet
 - no dedicated `drafting-engine`, `sources`, or `audit` packages
 
 ## Planned
@@ -116,11 +119,11 @@ working surfaces at this SHA:
 - Deployment and version-linked acceptance of the hardened
   `@wsa/extract-api-worker` revision using the
   [extract API runbook](./docs/ops/extract-api-runbook.md).
-- Anthropic and local provider adapters beyond the currently shipped
-  packages.
-- Shared provider routing and second-provider challenge orchestration.
-  The promotion gate already requires distinct-provider challenge evidence;
-  the current extraction runtime blocks promotable claims without it.
+- A local provider adapter and reviewed sensitive-intake policy/enablement.
+- Deliberate Worker adoption of shared provider routing and second-provider
+  challenge orchestration. Both source paths are shipped in the contracts and
+  evidence-engine packages; the existing Worker remains single-provider.
+  The promotion gate blocks promotable claims without the required evidence.
 - Any future control-plane API or CLI surfaces, if and when they are actually
   added to the repo.
 

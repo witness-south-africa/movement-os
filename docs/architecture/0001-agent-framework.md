@@ -1,13 +1,19 @@
 # ADR-0001: Agent framework choice
 
-- **Status:** Accepted (revised 2026-04-20 — see Revision history)
-- **Date:** 2026-04-18; revised 2026-04-20
+- **Status:** Accepted (revised 2026-10-03 — see Revision history)
+- **Date:** 2026-04-18; revised 2026-04-20 and 2026-10-03
 - **Deciders:** Rudi (founder); pending Cause Council ratification.
 - **Supersedes:** —
 - **Superseded by:** —
 
 ## Revision history
 
+- **2026-10-03 (issue #24 — Anthropic source adapter).**
+  `@wsa/agent-anthropic` implements the same contract over the native
+  Messages API using injected transport. It requests structured JSON,
+  normalizes unsupported wire-schema constraints and validates responses
+  against the caller's original Zod schema. This adds a source adapter;
+  Worker adoption, local inference and live provider acceptance remain pending.
 - **2026-04-20 (issue #24 — reality alignment).** The original ADR named
   the OpenAI Agents SDK for TypeScript as the default adapter, but the
   shipped adapters (`@wsa/agent-openai`, `@wsa/agent-xai`) are thin
@@ -48,17 +54,19 @@ Action Wing. The platform must:
   (`packages/agent-contracts/src/lib/model-provider.ts`).
 - Each adapter implements the contract directly against its provider's
   REST endpoint — Chat Completions for `@wsa/agent-openai`, xAI's
-  OpenAI-compatible endpoint for `@wsa/agent-xai`.
-- Transport is injected as a narrow `OpenAiClient` / `XaiClient` interface
+  OpenAI-compatible endpoint for `@wsa/agent-xai`, native Messages for
+  `@wsa/agent-anthropic`.
+- Transport is injected as a narrow client interface
   the adapter owns; the packages carry **no runtime dependency on
   `openai`, `@openai/agents`, or any vendor SDK**. Consumers pass in
   whatever satisfies the narrow shape — the real vendor SDK client, a
   fake for tests, a WebCrypto-friendly `fetch` wrapper on Workers.
 - Structured output is mandatory. The caller's Zod schema is converted to
-  JSON Schema and sent as
-  `response_format: { type: 'json_schema', strict: true, ... }`; the
-  adapter JSON-parses and re-validates on the way back. An unparseable
-  or shape-wrong response is a hard failure, not silent data corruption.
+  the provider's JSON Schema format: `response_format` for OpenAI/xAI,
+  `output_config.format` for Anthropic. The Anthropic adapter normalizes
+  documented unsupported constraints for the wire while retaining the
+  original Zod checks locally. Every adapter JSON-parses and re-validates
+  responses. Unsupported Anthropic schema shapes fail before dispatch.
 - **Trade-off.** We do not get the OpenAI Agents SDK's built-in handoffs,
   guardrails, or tracing. The current runtime surface (evidence-engine
   extraction and `extract-api-worker`) does not need them. When/if we do,
@@ -102,10 +110,10 @@ Action Wing. The platform must:
 
 Adopt **Option A**: a thin `ModelProvider` contract in
 `@wsa/agent-contracts` with direct-REST adapters. Shipped adapters are
-`@wsa/agent-openai` and `@wsa/agent-xai`. `@wsa/agent-anthropic` and a
-local-inference adapter are reserved in the provider-id union
-(`packages/agent-contracts/src/lib/provider-id.ts`) for later PRs per
-ADR-0003's provider matrix, and are not present on disk today.
+`@wsa/agent-openai`, `@wsa/agent-xai` and `@wsa/agent-anthropic`.
+A local-inference adapter remains reserved in the provider-id union
+(`packages/agent-contracts/src/lib/provider-id.ts`) for a later PR per
+ADR-0003's provider matrix. No local adapter is present on disk.
 
 The contract is the abstraction boundary. Swapping to an
 OpenAI-Agents-SDK-backed, LangGraph-backed, or fully self-hosted
@@ -162,7 +170,8 @@ because they depend only on the contract.
 - Each adapter ships its own spec suite that exercises the `ModelProvider`
   contract end-to-end against an injected fake client —
   `packages/agent-openai/src/lib/provider.spec.ts`,
-  `packages/agent-xai/src/lib/provider.spec.ts`, and siblings. Parity
+  `packages/agent-xai/src/lib/provider.spec.ts`,
+  `packages/agent-anthropic/src/lib/provider.spec.ts`, and siblings. Parity
   between adapters is a **human review invariant** today: when a new
   capability is added to one adapter, the reviewer checks that every
   other shipped adapter either implements it or documents the gap.
@@ -184,6 +193,10 @@ because they depend only on the contract.
 - Shipped adapters:
   - `packages/agent-openai/src/lib/provider.ts`
   - `packages/agent-xai/src/lib/provider.ts`
+  - `packages/agent-anthropic/src/lib/provider.ts`
+- Anthropic native Messages and structured output:
+  <https://platform.claude.com/docs/en/api/messages/create>
+  <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
 - OpenAI Agents SDK (JS/TS) — considered, not adopted:
   <https://github.com/openai/openai-agents-js>
 - LangGraph — considered, not adopted:

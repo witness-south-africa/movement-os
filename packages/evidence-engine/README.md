@@ -91,8 +91,13 @@ The [secret-free JSON example](../../config/provider-routing.example.json)
 selects xAI analysis and OpenAI challenge. Operators load and pass their own
 configuration; the factory does not read files, environment variables or
 credentials. Reverse pairing and other known provider IDs are configurable,
-but both real adapters must be injected and distinct. Reserved Anthropic/local
-IDs do not install their missing repository adapters.
+but both real adapters must be injected and distinct. The shipped
+[`@wsa/agent-anthropic`](../agent-anthropic/README.md) adapter can occupy either
+lane using its native injected Messages client. It requests structured JSON
+and validates the original extraction/challenge schema locally, including
+constraints normalized for the provider's wire format. Only native `end_turn`
+can complete a challenge; failed, incomplete or differently bound output keeps
+R7 blocking. The reserved local ID does not install a missing repository adapter.
 
 Construction validates the complete config and both adapters before any call.
 Before every extraction, the factory checks both selected adapters' identity
