@@ -18,6 +18,8 @@ export default {
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },
+  // jose is ESM-only; transform this dependency for Jest's CommonJS runner.
+  transformIgnorePatterns: ['node_modules/(?!\\.pnpm/jose@|jose/)'],
   moduleFileExtensions: ['ts', 'js', 'html'],
   coverageDirectory: 'test-output/jest/coverage',
 };

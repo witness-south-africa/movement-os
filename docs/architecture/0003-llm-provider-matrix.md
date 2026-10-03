@@ -35,9 +35,10 @@ Three things force the decision:
 
 - `openai` — injected Chat Completions and streaming Responses adapters.
   Responses supports explicitly configured API or subscription access with a
-  fixed public-endpoint fetch transport. OAuth sign-in, verified grants and
-  credential storage remain caller-owned; subscription access is scoped to the
-  official local OSS/self-hosted flow. See the [adapter contract](../../packages/agent-openai/README.md).
+  fixed public-endpoint fetch transport. A separate Node entry supplies OAuth,
+  signed identity/grant validation, protected Unix storage, serialized refresh
+  and account lifecycle for the official local OSS/self-hosted flow. Callers supply
+  operator UI; live account acceptance remains pending. See the [adapter contract](../../packages/agent-openai/README.md).
 - `xai` — xAI (Grok) API. Added day one. xAI's API is OpenAI-
   compatible via `base_url="https://api.x.ai/v1"`, so the adapter
   is thin. Grok supports tool use, function calling, and schema-
@@ -95,7 +96,8 @@ challenge requirement. Subscription preview rejects `max_output_tokens`, so the
 Responses adapter rejects calls with a hard output-token cap before dispatch.
 Both evidence-engine lanes always supply caps and therefore require API mode.
 Subscription exhaustion or unavailable usage throws a typed stop; no automatic
-API fallback, retry, credential loading or monetary accounting is shipped.
+API fallback, retry or monetary accounting is shipped. Credential loading is
+available only through the explicit Node account integration.
 Future fallback requires explicit authorization, a finite API cap and executable
 pre-dispatch spend reservation. Local stream byte/time limits do not establish a
 vendor token or spending ceiling.
