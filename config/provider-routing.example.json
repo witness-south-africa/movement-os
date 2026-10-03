@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "lanes": {
+    "sensitive-intake": null,
+    "analysis": "xai",
+    "challenge": "openai"
+  }
+}

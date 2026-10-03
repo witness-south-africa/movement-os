@@ -46,8 +46,9 @@ Three things force the decision:
 
 ### The three lanes
 
-The policy defines three lanes. Callers currently select and construct
-providers; no shared dispatcher implements automatic lane routing.
+The policy defines three lanes. Shared versioned routing config can select
+already-constructed providers for analysis and challenge. Version 1 deliberately
+keeps sensitive intake disabled; there is no automatic Worker routing.
 
 **Lane 1 — Sensitive intake lane.**
 Unredacted witness intake, raw identifying information, minors'
@@ -90,11 +91,20 @@ and dossier drafting are policy use cases, not additional shipped task IDs.
 
 ### Intended routing and current wiring
 
-The lane policy above remains the platform intent. `movement-os` does
-not ship a default routing table or shared `config/routing.yaml`.
-The current v0.1
-runtime wiring is package-local: callers choose a provider when they
-construct the runtime that invokes it. The first real consumer is
+The lane policy above remains the platform intent. `@wsa/agent-contracts`
+ships a strict version-1 JSON routing schema and `createProviderRouter()`.
+The [secret-free example](../../config/provider-routing.example.json) selects
+xAI analysis and OpenAI challenge, with sensitive intake explicitly `null`.
+Both distinct adapters must be injected, identity-matched and callable;
+missing adapters, invalid config or disabled tasks fail without fallback.
+Reserved provider IDs do not install adapters. Config and adapter selections
+are snapshots; applying changes requires a new router or engine. Routing does
+not classify material or verify contractual terms, residency or spend.
+
+There is no automatically loaded default routing configuration. Existing
+runtime wiring remains package-local unless a caller deliberately opts into
+`createRoutedEvidenceEngine()`, which validates both selected adapters before
+every extraction and delegates to the existing evidence engine. The first real consumer is
 `@wsa/evidence-engine`, which uses xAI in the analysis lane for
 structured claim extraction and immediately runs the promotion gate
 before returning results.
@@ -111,7 +121,8 @@ supporting-provenance requirements. Blocked candidates remain `contested`.
 
 The [engine documentation](../../packages/evidence-engine/README.md#optional-challenge-provider)
 records request bounds, reported costs and trust limits. The extract Worker
-does not enable a challenger. Shared routing, remaining adapters and
+does not enable a challenger or load routing config. Operator deployment
+configuration, remaining adapters, persistent audit integration and
 version-linked deployed challenge acceptance remain delivery work.
 
 ### Analysis workloads
@@ -196,8 +207,8 @@ The same principle applies to OpenAI and Anthropic. See
 - Two adapters to maintain from day one, three when `anthropic` is
   wired in, four when `local` is.
 - Small extra latency and cost per promotion (challenge lane).
-- Operators must make a routing decision rather than get a defaults-
-  only experience. Shared routing defaults remain implementation work.
+- Operators must provide routing config and constructed adapters rather than
+  get an automatically enabled defaults-only experience.
 
 ## Rollout
 
@@ -218,7 +229,7 @@ Rollout has now partially landed:
 5. Remaining follow-ups:
    - `@wsa/agent-anthropic` parity adapter
    - local / self-hosted adapter
-   - deployment-level routing config + audit-log integration
+   - operator-owned deployment routing configuration and audit-log integration
    - deployment wiring and runtime acceptance of the optional challenge lane
 
 ## References

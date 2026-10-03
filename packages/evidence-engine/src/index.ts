@@ -26,3 +26,5 @@ export type {
   EvidenceEngineConfig,
   XaiEvidenceEngineConfig,
 } from './lib/runtime.js';
+export { createRoutedEvidenceEngine } from './lib/routed-engine.js';
+export type { RoutedEvidenceEngineConfig } from './lib/routed-engine.js';
