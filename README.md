@@ -54,8 +54,10 @@ This sentence is the platform's public API. It is pinned in
 - `packages/`
   - `@wsa/agent-contracts` — provider-agnostic model contracts, schemas, and
     test doubles for analysis/challenge adapters.
-  - `@wsa/agent-openai` — OpenAI-compatible adapter utilities, including
-    provider wiring and JSON-schema/finish-reason helpers.
+  - `@wsa/agent-openai` — injected Chat Completions and streaming Responses
+    adapters. Responses has explicit API/subscription access modes and an
+    optional fixed-endpoint fetch transport; sign-in and budget fallback remain
+    caller-owned. Subscription rejects hard output-token caps.
   - `@wsa/agent-xai` — in-repo provider adapter package with budget,
     telemetry, and prompt-shaping helpers for internal runtime wiring.
   - `@wsa/agent-anthropic` — injected native Messages adapter with structured
