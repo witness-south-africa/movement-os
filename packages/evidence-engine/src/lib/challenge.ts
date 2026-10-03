@@ -35,6 +35,7 @@ export type ClaimChallengeAssessment = z.infer<
 export const ProviderResponseMetadataSchema = z.object({
   provider: LlmProviderIdSchema,
   model: z.string().min(1).max(256),
+  accessMode: z.enum(['api', 'subscription']).optional(),
   status: ResponseStatusSchema,
   rawFinishReason: z.string().min(1).max(128),
   responseId: z.string().min(1).max(512).optional(),
@@ -47,6 +48,7 @@ export type CompletedProviderRun = ProviderRun & {
   readonly sourceRef: ClaimSourceRef;
   readonly sourceSha256: string;
   readonly model: string;
+  readonly accessMode?: 'api' | 'subscription';
   readonly at: string;
   readonly responseId?: string;
   readonly rawFinishReason: string;
@@ -57,6 +59,7 @@ interface ChallengeCallMetadata {
   readonly requestId: string;
   readonly at: string;
   readonly model?: string;
+  readonly accessMode?: 'api' | 'subscription';
   readonly responseId?: string;
   readonly responseStatus?: ResponseStatus;
   readonly rawFinishReason?: string;
@@ -80,11 +83,13 @@ export type ClaimChallengeAttempt = ChallengeCallMetadata &
           | 'invalid-response'
           | 'incomplete-response'
           | 'provider-mismatch'
+          | 'access-mode-mismatch'
+          | 'quota-exhausted'
           | 'binding-mismatch';
       }
     | {
         readonly outcome: 'skipped';
-        readonly reason: 'analysis-incomplete';
+        readonly reason: 'analysis-incomplete' | 'subscription-quota-exhausted';
       }
   );
 
@@ -101,7 +106,8 @@ export async function challengeClaim(args: {
   readonly binding: ChallengeBinding;
   readonly sourceText: string;
   readonly requestId: string;
-  readonly maxOutputTokens: number;
+  readonly maxOutputTokens: number | undefined;
+  readonly expectedAccessMode?: 'subscription';
   readonly timeoutMs: number;
   readonly now: () => Date;
 }): Promise<ClaimChallengeAttempt> {
@@ -115,7 +121,9 @@ export async function challengeClaim(args: {
       taskKind: 'challenge',
       requestId: args.requestId,
       schema: ClaimChallengeAssessmentSchema,
-      maxOutputTokens: args.maxOutputTokens,
+      ...(args.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: args.maxOutputTokens }),
       timeoutMs: args.timeoutMs,
       messages: [
         {
@@ -138,12 +146,16 @@ export async function challengeClaim(args: {
         },
       ],
     });
-  } catch {
+  } catch (error: unknown) {
     return {
       ...call,
       at: args.now().toISOString(),
       outcome: 'failed',
-      reason: 'provider-error',
+      reason:
+        args.expectedAccessMode === 'subscription' &&
+        hasQuotaExhaustedCode(error)
+          ? 'quota-exhausted'
+          : 'provider-error',
     };
   }
 
@@ -160,6 +172,9 @@ export async function challengeClaim(args: {
     ...call,
     at,
     model: received.model,
+    ...(received.accessMode === undefined
+      ? {}
+      : { accessMode: received.accessMode }),
     responseStatus: received.status,
     rawFinishReason: received.rawFinishReason,
     usage: received.usage,
@@ -167,6 +182,12 @@ export async function challengeClaim(args: {
       ? {}
       : { responseId: received.responseId }),
   };
+  if (
+    args.expectedAccessMode !== undefined &&
+    received.accessMode !== args.expectedAccessMode
+  ) {
+    return { ...metadata, outcome: 'failed', reason: 'access-mode-mismatch' };
+  }
   if (
     received.status !== 'completed' ||
     // The shipped adapters use these terminators for truncated/refused output.
@@ -199,4 +220,17 @@ export async function challengeClaim(args: {
     outcome: 'completed',
     assessment: value,
   };
+}
+
+function hasQuotaExhaustedCode(error: unknown): boolean {
+  try {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      Object.getOwnPropertyDescriptor(error, 'code')?.value ===
+        'quota_exhausted'
+    );
+  } catch {
+    return false;
+  }
 }

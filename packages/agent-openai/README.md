@@ -75,9 +75,12 @@ schemas reject. The original Zod schema validates the returned JSON locally.
 API mode forwards a supplied positive safe-integer `maxOutputTokens` as
 `max_output_tokens`. Subscription mode rejects **any supplied output cap before
 credential resolution or network** because the official preview does not accept
-that field. It never silently drops the hard ceiling. Both evidence-engine lanes
-always supply caps, so their current calls require API mode. Uncapped subscription
-calls are for deliberately configured callers that accept that limitation.
+that field. It never silently drops the hard ceiling. Evidence-engine defaults
+retain caps and require API mode. Its explicit
+[subscription policy](../evidence-engine/README.md#openai-subscription-output-policy)
+can omit the cap for one declared subscription lane after acknowledging uncapped
+output; a supplied global cap still rejects before either engine call. Other
+uncapped subscription callers must likewise accept that limitation.
 [Official preview requirements](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 Only a validated native `response.completed` snapshot, followed by clean stream

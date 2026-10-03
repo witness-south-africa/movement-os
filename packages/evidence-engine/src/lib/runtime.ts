@@ -33,6 +33,12 @@ import {
   type CompletedProviderRun,
 } from './challenge.js';
 import { ClaimExtractionOutputSchema } from './extraction-schema.js';
+import {
+  createSubscriptionPolicyGuard,
+  snapshotSubscriptionPolicy,
+  type OpenAiSubscriptionPolicy,
+  type SubscriptionPolicyGuard,
+} from './subscription-policy.js';
 import { generateUlid } from './ulid.js';
 
 const DEFAULT_ACTOR_ID = AgentIdSchema.parse('agent:evidence-engine');
@@ -103,6 +109,7 @@ export interface ExtractionResult {
   readonly summary: string;
   readonly provider: ModelProvider['id'];
   readonly model: string;
+  readonly accessMode?: 'api' | 'subscription';
   readonly responseId?: string;
   readonly rawFinishReason?: string;
   readonly status: ResponseStatus;
@@ -117,6 +124,7 @@ export interface EvidenceEngine {
 export interface EvidenceEngineConfig {
   readonly provider: ModelProvider;
   readonly challengeProvider?: ModelProvider;
+  readonly subscriptionPolicy?: OpenAiSubscriptionPolicy;
   readonly actorId?: AgentId;
   readonly extractorId?: ClaimExtractor;
   readonly now?: () => Date;
@@ -125,6 +133,7 @@ export interface EvidenceEngineConfig {
 
 export interface XaiEvidenceEngineConfig extends XaiProviderConfig {
   readonly challengeProvider?: ModelProvider;
+  readonly subscriptionPolicy?: OpenAiSubscriptionPolicy;
   readonly actorId?: AgentId;
   readonly extractorId?: ClaimExtractor;
   readonly now?: () => Date;
@@ -134,21 +143,23 @@ export interface XaiEvidenceEngineConfig extends XaiProviderConfig {
 export function createEvidenceEngine(
   config: EvidenceEngineConfig,
 ): EvidenceEngine {
+  const snapshot = { ...config };
+  const policy = snapshotSubscriptionPolicy(snapshot.subscriptionPolicy);
+  const guard = createSubscriptionPolicyGuard(
+    policy,
+    snapshot.provider,
+    snapshot.challengeProvider,
+  );
   return {
     extractClaims: async (input: ExtractionInput): Promise<ExtractionResult> =>
-      extractClaimsWithProvider({
-        provider: config.provider,
-        input,
-        ...(config.challengeProvider === undefined
-          ? {}
-          : { challengeProvider: config.challengeProvider }),
-        ...(config.actorId === undefined ? {} : { actorId: config.actorId }),
-        ...(config.extractorId === undefined
-          ? {}
-          : { extractorId: config.extractorId }),
-        ...(config.now === undefined ? {} : { now: config.now }),
-        ...(config.createId === undefined ? {} : { createId: config.createId }),
-      }),
+      extractClaimsWithPolicy(
+        {
+          ...snapshot,
+          input,
+        },
+        policy,
+        guard,
+      ),
   };
 }
 
@@ -161,11 +172,13 @@ export function createXaiEvidenceEngine(
     now,
     createId,
     challengeProvider,
+    subscriptionPolicy,
     ...providerConfig
   } = config;
   return createEvidenceEngine({
     provider: createXaiProvider(providerConfig),
     ...(challengeProvider === undefined ? {} : { challengeProvider }),
+    ...(subscriptionPolicy === undefined ? {} : { subscriptionPolicy }),
     ...(actorId === undefined ? {} : { actorId }),
     ...(extractorId === undefined ? {} : { extractorId }),
     ...(now === undefined ? {} : { now }),
@@ -173,16 +186,37 @@ export function createXaiEvidenceEngine(
   });
 }
 
-export async function extractClaimsWithProvider(args: {
-  readonly provider: ModelProvider;
-  readonly challengeProvider?: ModelProvider;
-  readonly input: ExtractionInput;
-  readonly actorId?: AgentId;
-  readonly extractorId?: ClaimExtractor;
-  readonly now?: () => Date;
-  readonly createId?: () => string;
-}): Promise<ExtractionResult> {
+export async function extractClaimsWithProvider(
+  args: EvidenceEngineConfig & {
+    readonly input: ExtractionInput;
+  },
+): Promise<ExtractionResult> {
+  const snapshot = { ...args };
+  const policy = snapshotSubscriptionPolicy(snapshot.subscriptionPolicy);
+  const guard = createSubscriptionPolicyGuard(
+    policy,
+    snapshot.provider,
+    snapshot.challengeProvider,
+  );
+  return extractClaimsWithPolicy(snapshot, policy, guard);
+}
+
+async function extractClaimsWithPolicy(
+  args: EvidenceEngineConfig & { readonly input: ExtractionInput },
+  policy: OpenAiSubscriptionPolicy | undefined,
+  guard: SubscriptionPolicyGuard,
+): Promise<ExtractionResult> {
   const input = ExtractionInputSchema.parse(args.input);
+  guard.assertInput(input.maxOutputTokens);
+  guard.assertBindings();
+  const analysisMaxOutputTokens =
+    policy?.lane === 'analysis'
+      ? undefined
+      : (input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS);
+  const challengeMaxOutputTokens =
+    policy?.lane === 'challenge'
+      ? undefined
+      : (input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS);
   const actorId = args.actorId ?? DEFAULT_ACTOR_ID;
   const extractorId = args.extractorId ?? DEFAULT_EXTRACTOR_ID;
   const now = args.now ?? (() => new Date());
@@ -200,9 +234,12 @@ export async function extractClaimsWithProvider(args: {
     messages: buildMessages(input),
     taskKind: 'analysis',
     requestId: input.requestId,
-    maxOutputTokens: input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+    ...(analysisMaxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: analysisMaxOutputTokens }),
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
+  guard.assertBindings();
 
   const occurredAt = now().toISOString();
   const metadata = ProviderResponseMetadataSchema.safeParse(response);
@@ -214,9 +251,19 @@ export async function extractClaimsWithProvider(args: {
       'analysis response provider does not match configured provider',
     );
   }
+  if (
+    policy?.lane === 'analysis' &&
+    metadata.data.accessMode !== 'subscription'
+  ) {
+    throw new Error(
+      'analysis response does not match subscription access mode',
+    );
+  }
   const output = schema.parse(response.value);
   const items: ExtractedClaimRecord[] = [];
+  const subscriptionChallengeState = { quotaExhausted: false };
   for (const candidate of output.claims) {
+    guard.assertBindings();
     items.push(
       await buildExtractedClaimRecord({
         requestId: input.requestId,
@@ -238,7 +285,15 @@ export async function extractClaimsWithProvider(args: {
           metadata.data.rawFinishReason !== 'content_filter',
         rawFinishReason: metadata.data.rawFinishReason,
         now,
-        maxOutputTokens: input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: challengeMaxOutputTokens,
+        subscriptionGuard: guard,
+        subscriptionChallengeState,
+        ...(policy?.lane === 'challenge'
+          ? { expectedChallengeAccessMode: 'subscription' as const }
+          : {}),
+        ...(metadata.data.accessMode === undefined
+          ? {}
+          : { accessMode: metadata.data.accessMode }),
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         ...(args.challengeProvider === undefined
           ? {}
@@ -251,11 +306,15 @@ export async function extractClaimsWithProvider(args: {
     );
   }
 
+  guard.assertBindings();
   return {
     requestId: input.requestId,
     summary: output.summary,
     provider: response.provider,
     model: metadata.data.model,
+    ...(metadata.data.accessMode === undefined
+      ? {}
+      : { accessMode: metadata.data.accessMode }),
     ...(metadata.data.responseId === undefined
       ? {}
       : { responseId: metadata.data.responseId }),
@@ -306,6 +365,7 @@ async function buildExtractedClaimRecord(args: {
   readonly occurredAt: string;
   readonly providerId: ModelProvider['id'];
   readonly model: string;
+  readonly accessMode?: 'api' | 'subscription';
   readonly responseId?: string;
   readonly createId: () => string;
   readonly sourceText: string;
@@ -313,7 +373,10 @@ async function buildExtractedClaimRecord(args: {
   readonly rawFinishReason: string;
   readonly challengeProvider?: ModelProvider;
   readonly challengeProviderId?: ModelProvider['id'];
-  readonly maxOutputTokens: number;
+  readonly maxOutputTokens: number | undefined;
+  readonly expectedChallengeAccessMode?: 'subscription';
+  readonly subscriptionGuard: SubscriptionPolicyGuard;
+  readonly subscriptionChallengeState: { quotaExhausted: boolean };
   readonly timeoutMs: number;
   readonly now: () => Date;
 }): Promise<ExtractedClaimRecord> {
@@ -366,6 +429,9 @@ async function buildExtractedClaimRecord(args: {
           ...binding,
           requestId: args.requestId,
           model: args.model,
+          ...(args.accessMode === undefined
+            ? {}
+            : { accessMode: args.accessMode }),
           at: args.occurredAt,
           rawFinishReason: args.rawFinishReason,
           ...(args.responseId === undefined
@@ -380,25 +446,46 @@ async function buildExtractedClaimRecord(args: {
     args.challengeProviderId !== undefined &&
     PROMOTABLE_STATUSES.has(requestedStatus)
   ) {
+    args.subscriptionGuard.assertBindings();
     const requestId = `${args.requestId}:challenge:${claimId}`;
-    challenge = args.analysisCompleted
-      ? await challengeClaim({
-          provider: args.challengeProvider,
-          providerId: args.challengeProviderId,
-          binding,
-          sourceText: args.sourceText,
-          requestId,
-          maxOutputTokens: args.maxOutputTokens,
-          timeoutMs: args.timeoutMs,
-          now: args.now,
-        })
-      : {
-          provider: args.challengeProviderId,
-          requestId,
-          at: args.now().toISOString(),
-          outcome: 'skipped',
-          reason: 'analysis-incomplete',
-        };
+    challenge =
+      args.expectedChallengeAccessMode === 'subscription' &&
+      args.subscriptionChallengeState.quotaExhausted
+        ? {
+            provider: args.challengeProviderId,
+            requestId,
+            at: args.now().toISOString(),
+            outcome: 'skipped',
+            reason: 'subscription-quota-exhausted',
+          }
+        : args.analysisCompleted
+          ? await challengeClaim({
+              provider: args.challengeProvider,
+              providerId: args.challengeProviderId,
+              binding,
+              sourceText: args.sourceText,
+              requestId,
+              maxOutputTokens: args.maxOutputTokens,
+              ...(args.expectedChallengeAccessMode === undefined
+                ? {}
+                : { expectedAccessMode: args.expectedChallengeAccessMode }),
+              timeoutMs: args.timeoutMs,
+              now: args.now,
+            })
+          : {
+              provider: args.challengeProviderId,
+              requestId,
+              at: args.now().toISOString(),
+              outcome: 'skipped',
+              reason: 'analysis-incomplete',
+            };
+    args.subscriptionGuard.assertBindings();
+    if (
+      challenge.outcome === 'failed' &&
+      challenge.reason === 'quota-exhausted'
+    ) {
+      args.subscriptionChallengeState.quotaExhausted = true;
+    }
     if (challenge.outcome === 'completed') {
       providerRuns.push({
         provider: args.challengeProviderId,
@@ -406,6 +493,9 @@ async function buildExtractedClaimRecord(args: {
         ...binding,
         requestId,
         model: challenge.model,
+        ...(challenge.accessMode === undefined
+          ? {}
+          : { accessMode: challenge.accessMode }),
         at: challenge.at,
         rawFinishReason: challenge.rawFinishReason,
         ...(challenge.responseId === undefined
@@ -454,6 +544,9 @@ async function buildExtractedClaimRecord(args: {
         promotion,
         providerId: args.providerId,
         model: args.model,
+        ...(args.accessMode === undefined
+          ? {}
+          : { accessMode: args.accessMode }),
         ...(args.responseId === undefined
           ? {}
           : { responseId: args.responseId }),
@@ -471,6 +564,9 @@ async function buildExtractedClaimRecord(args: {
                 sourceRef: args.sourceRef,
                 sourceSha256: binding.sourceSha256,
                 provider: challenge.provider,
+                ...(challenge.accessMode === undefined
+                  ? {}
+                  : { accessMode: challenge.accessMode }),
                 outcome: challenge.outcome,
                 ...(challenge.outcome === 'completed'
                   ? { supports: challenge.assessment.supports }
@@ -531,6 +627,7 @@ function buildAuditTrail(args: {
   readonly promotion: PromotionDecision;
   readonly providerId: ModelProvider['id'];
   readonly model: string;
+  readonly accessMode?: 'api' | 'subscription';
   readonly responseId?: string;
 }): readonly ExtractionAuditRecord[] {
   return [
@@ -546,6 +643,9 @@ function buildAuditTrail(args: {
         effectiveStatus: args.effectiveStatus,
         provider: args.providerId,
         model: args.model,
+        ...(args.accessMode === undefined
+          ? {}
+          : { accessMode: args.accessMode }),
         promotionOk: args.promotion.ok,
         promotionRuleCodes: args.promotion.reasons.map((reason) => reason.code),
         ...(args.responseId === undefined

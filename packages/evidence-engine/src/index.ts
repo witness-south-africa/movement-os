@@ -28,3 +28,4 @@ export type {
 } from './lib/runtime.js';
 export { createRoutedEvidenceEngine } from './lib/routed-engine.js';
 export type { RoutedEvidenceEngineConfig } from './lib/routed-engine.js';
+export type { OpenAiSubscriptionPolicy } from './lib/subscription-policy.js';
