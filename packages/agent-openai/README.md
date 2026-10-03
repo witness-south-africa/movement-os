@@ -25,8 +25,11 @@ The separate Node-only `@wsa/agent-openai/subscription-auth` entry provides offi
 registration and loopback sign-in, signed identity/grant verification, a protected
 Unix store, serialized refresh, account selection, model catalog loading and
 sign-out. See the [operator integration guide](../../docs/ops/openai-subscription-auth.md).
-The caller supplies its browser opener, account menu and model chooser. An injected
-resolver or custom store remains a trusted integration boundary. Do not substitute
+The terminal manager runs with `pnpm openai:accounts` after building this package;
+see the guide for explicit private storage/host flags and account commands. It
+uses the reviewed session/store and system browser, and performs no inference.
+Custom callers supply their browser opener, account menu and model chooser. An
+injected resolver or custom store remains a trusted integration boundary. Do not substitute
 browser cookies or local Codex tokens for the official flow.
 
 Subscription construction requires explicit `hosting:'local' | 'self-hosted'`.

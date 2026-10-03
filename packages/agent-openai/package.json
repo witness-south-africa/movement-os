@@ -5,6 +5,9 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "movement-openai-accounts": "./dist/operator-cli.js"
+  },
   "exports": {
     "./package.json": "./package.json",
     "./subscription-auth": {
