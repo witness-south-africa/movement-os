@@ -50,6 +50,11 @@ command in WSL. Keep the terminal open while completing **Continue with ChatGPT*
 choosing the intended account and authorizing plan usage. The native `127.0.0.1`
 callback must be reachable from that browser before the five-minute session
 expires. WSL or VM reachability requires actual observation during the run.
+When coordinating sign-in in chat, wait until the operator is ready, then send
+the fresh link directly in the chat so it can be clicked or copied. Keep the
+local listener running; do not put the link only inside a choice question or
+reuse an expired link. The operator can report callback completion without
+sharing the callback URL or authorization code.
 Cancellation, terminal EOF and output failure stop the attempt; do not paste
 callback codes or credentials into the terminal.
 
@@ -116,7 +121,14 @@ Retain the report with the exact command, date and observed browser behavior.
 For response failures, `failure.diagnostics.validationFailure` identifies a finite
 local rejection category, such as framing, event, completion, usage or schema
 validation. Finite `httpStatus`, `bodyShape` and validated `providerCode` may also
-be present. These categories identify the rejected boundary without accepting an
+be present. On successful HTTP responses rejected for an absent body or unexpected
+streaming header, `httpStatus` records the observed status and
+`contentTypeCategory` records only `missing`, `event_stream`, `json`, `html`,
+`text` or `other`. These classify the normalized header, not the response body.
+`missing` includes an absent or empty media type; `event_stream` can accompany
+an absent body. Raw MIME values and header parameters remain excluded, and
+unexpected formats are canceled without reading their bodies.
+These categories identify the rejected boundary without accepting an
 invalid response or proving the provider's underlying cause. Request IDs, raw
 events, schema paths, provider text and response bodies remain excluded.
 

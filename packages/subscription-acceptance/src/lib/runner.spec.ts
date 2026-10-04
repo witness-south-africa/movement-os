@@ -474,31 +474,48 @@ describe('fresh account subscription acceptance', () => {
       new Response('PRIVATE-BODY', {
         headers: { 'content-type': 'text/plain' },
       }),
-      'response_content_type',
+      {
+        validationFailure: 'response_content_type',
+        httpStatus: 200,
+        contentTypeCategory: 'text',
+      },
     ],
-    [new Response(null), 'response_body'],
+    [
+      new Response(null),
+      {
+        validationFailure: 'response_body',
+        httpStatus: 200,
+        contentTypeCategory: 'missing',
+      },
+    ],
     [
       stream({ type: 'PRIVATE-NEW-EVENT', private: 'PRIVATE-CONTENT' }),
-      'event_type',
+      { validationFailure: 'event_type' },
     ],
-    [stream(completed({ usage: undefined })), 'completion_usage'],
-    [stream(completed({ output: [] })), 'completion_output'],
+    [
+      stream(completed({ usage: undefined })),
+      { validationFailure: 'completion_usage' },
+    ],
+    [
+      stream(completed({ output: [] })),
+      { validationFailure: 'completion_output' },
+    ],
     [
       new Response('data: PRIVATE-INVALID-JSON\n\n', {
         headers: { 'content-type': 'text/event-stream' },
       }),
-      'event_json',
+      { validationFailure: 'event_json' },
     ],
   ])(
     'carries only the finite native rejection into the receipt (%s)',
-    async (response, validationFailure) => {
+    async (response, diagnostics) => {
       const h = harness();
       h.setStream(response as Response);
       const result = await runAcceptance(config, provenance, h.deps);
       expect(result.failure).toEqual({
         stage: 'inference',
         code: 'invalid_response',
-        diagnostics: { validationFailure },
+        diagnostics,
       });
       expect(result.responsesDispatches).toBe(1);
       expect(result.analysisAccepted).toBe(false);
@@ -510,6 +527,68 @@ describe('fresh account subscription acceptance', () => {
       );
     },
   );
+  it.each([
+    [undefined, 'missing', 201, false],
+    ['application/json; PRIVATE-PARAMETER', 'json', 202, false],
+    ['text/html; PRIVATE-PARAMETER', 'html', 206, false],
+    ['text/plain; PRIVATE-PARAMETER', 'text', 200, false],
+    ['PRIVATE-MIME', 'other', 200, false],
+    ['TEXT/EVENT-STREAM; PRIVATE-PARAMETER', 'event_stream', 204, true],
+  ])(
+    'retains only finite header diagnostics in the subscription receipt (%s)',
+    async (header, category, status, absentBody) => {
+      const h = harness();
+      h.setStream(
+        new Response(
+          absentBody ? null : new TextEncoder().encode('PRIVATE-BODY'),
+          {
+            status: status as number,
+            headers: {
+              ...(header === undefined
+                ? {}
+                : { 'content-type': header as string }),
+              'x-request-id': 'PRIVATE-REQUEST',
+            },
+          },
+        ),
+      );
+      const result = await runAcceptance(config, provenance, h.deps);
+      expect(result.failure).toEqual({
+        stage: 'inference',
+        code: 'invalid_response',
+        diagnostics: {
+          validationFailure: absentBody
+            ? 'response_body'
+            : 'response_content_type',
+          httpStatus: status,
+          contentTypeCategory: category,
+        },
+      });
+      expect(result.responsesDispatches).toBe(1);
+      expect(result.analysisAccepted).toBe(false);
+      expect(result.response).toBeUndefined();
+      expect(result.localCredentialsCleared).toBe(true);
+      expect(result.remoteRevocationConfirmed).toBe(true);
+      expect(JSON.stringify(result)).not.toMatch(
+        /PRIVATE-|requestId|PARAMETER|BODY/,
+      );
+    },
+  );
+
+  it('excludes a mutated content-type category from the receipt', async () => {
+    const h = harness();
+    const error = new OpenAiResponsesError('invalid_response');
+    Object.defineProperty(error, 'diagnostics', {
+      value: { httpStatus: 201, contentTypeCategory: 'PRIVATE-MIME' },
+    });
+    h.signInFailure(error);
+    const result = await runAcceptance(config, provenance, h.deps);
+    expect(result.failure).toEqual({
+      stage: 'signIn',
+      code: 'invalid_response',
+    });
+    expect(JSON.stringify(result)).not.toMatch(/PRIVATE-|diagnostics/);
+  });
   it('keeps finite HTTP diagnostics but omits even syntactically valid request identities', async () => {
     const h = harness();
     h.setStream(

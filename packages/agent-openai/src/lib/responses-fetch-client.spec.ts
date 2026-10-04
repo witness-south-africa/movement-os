@@ -611,16 +611,150 @@ describe('authenticated Responses fetch transport', () => {
       ),
     ).rejects.toMatchObject({
       code: 'invalid_response',
-      diagnostics: { validationFailure: 'response_content_type' },
+      diagnostics: {
+        validationFailure: 'response_content_type',
+        httpStatus: 200,
+        contentTypeCategory: 'json',
+      },
     });
   });
 
   it('distinguishes an absent body from an unexpected content type', async () => {
     await expect(collect(apiConfig(new Response(null)))).rejects.toMatchObject({
       code: 'invalid_response',
-      diagnostics: { validationFailure: 'response_body' },
+      diagnostics: {
+        validationFailure: 'response_body',
+        httpStatus: 200,
+        contentTypeCategory: 'missing',
+      },
     });
   });
+
+  it.each([
+    [undefined, 'missing', 200],
+    ['', 'missing', 200],
+    [' ; PRIVATE-PARAMETER', 'missing', 200],
+    ['APPLICATION/JSON; PRIVATE-PARAMETER', 'json', 201],
+    ['application/problem+json', 'json', 202],
+    ['application/vnd.PRIVATE-VENDOR+json', 'json', 206],
+    ['text/html; PRIVATE-PARAMETER', 'html', 200],
+    ['application/xhtml+xml', 'html', 200],
+    ['text/plain; PRIVATE-PARAMETER', 'text', 200],
+    ['text/PRIVATE-SUBTYPE', 'text', 200],
+    ['application/octet-stream', 'other', 200],
+    ['PRIVATE-MIME', 'other', 200],
+    ['application/invalid type+json', 'other', 200],
+    ['text/invalid type', 'other', 200],
+    [`application/${'x'.repeat(257)}+json`, 'other', 200],
+    ['text/event-stream,application/json', 'other', 200],
+  ])(
+    'classifies rejected header %s without pulling its body',
+    async (contentType, contentTypeCategory, status) => {
+      const pull = jest.fn();
+      const cancel = jest.fn();
+      const body = new ReadableStream<Uint8Array>(
+        { pull, cancel },
+        { highWaterMark: 0 },
+      );
+      const response = new Response(body, {
+        status: status as number,
+        headers:
+          contentType === undefined
+            ? {}
+            : { 'content-type': contentType as string },
+      });
+      const fetch = jest.fn(() => Promise.resolve(response));
+      try {
+        await collect({ ...apiConfig(response), fetch });
+        throw new Error('expected header rejection');
+      } catch (error) {
+        expect(error).toMatchObject({
+          code: 'invalid_response',
+          diagnostics: {
+            validationFailure: 'response_content_type',
+            httpStatus: status,
+            contentTypeCategory,
+          },
+        });
+        expect(JSON.stringify(error)).not.toMatch(/PRIVATE-|PARAMETER|VENDOR/);
+      }
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(pull).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(body.locked).toBe(false);
+    },
+  );
+
+  it.each([
+    [undefined, 'missing', 204],
+    ['text/event-stream; PRIVATE-PARAMETER', 'event_stream', 205],
+    ['application/json', 'json', 200],
+  ])(
+    'keeps absent-body precedence for header %s',
+    async (header, category, status) => {
+      const response = new Response(null, {
+        status: status as number,
+        headers:
+          header === undefined ? {} : { 'content-type': header as string },
+      });
+      await expect(collect(apiConfig(response))).rejects.toMatchObject({
+        code: 'invalid_response',
+        diagnostics: {
+          validationFailure: 'response_body',
+          httpStatus: status,
+          contentTypeCategory: category,
+        },
+      });
+    },
+  );
+
+  it('retains header diagnostics when rejected-body cancellation fails', async () => {
+    const pull = jest.fn();
+    const cancel = jest.fn(() => Promise.reject(new Error('PRIVATE-CANCEL')));
+    const body = new ReadableStream<Uint8Array>(
+      { pull, cancel },
+      { highWaterMark: 0 },
+    );
+    await expect(collect(apiConfig(new Response(body)))).rejects.toMatchObject({
+      code: 'invalid_response',
+      diagnostics: {
+        validationFailure: 'response_content_type',
+        httpStatus: 200,
+        contentTypeCategory: 'missing',
+      },
+    });
+    expect(pull).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ' Text/Event-Stream ; charset=utf-8',
+    'TEXT/EVENT-STREAM',
+    'text/event-stream',
+  ])(
+    'continues consuming valid normalized SSE headers (%s)',
+    async (header) => {
+      const response = sse(['data: {"ok":true}\n\n']);
+      response.headers.set('content-type', header);
+      await expect(collect(apiConfig(response))).resolves.toEqual([
+        { ok: true },
+      ]);
+    },
+  );
+
+  it.each(['PRIVATE-MIME', 'JSON', { type: 'PRIVATE-TYPE' }])(
+    'drops an injected nonfinite content-type category (%s)',
+    (contentTypeCategory) => {
+      const error = new OpenAiResponsesError('invalid_response');
+      Object.defineProperty(error, 'diagnostics', {
+        value: { httpStatus: 201, contentTypeCategory },
+      });
+      const sanitized = sanitizeOpenAiResponsesError(error);
+      expect(sanitized.code).toBe('invalid_response');
+      expect(sanitized.diagnostics).toBeUndefined();
+      expect(JSON.stringify(sanitized)).not.toMatch(/PRIVATE-|JSON|TYPE/);
+    },
+  );
 
   it('parses split UTF-8, comments, CRLF and multiline data', async () => {
     const bytes = encoder.encode(

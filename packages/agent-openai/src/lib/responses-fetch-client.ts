@@ -186,18 +186,21 @@ export function createOpenAiResponsesFetchClient(
         if (!response.ok) {
           throw await httpFailure(response, options.signal);
         }
-        if (
-          response.body === null ||
-          response.headers
-            .get('content-type')
-            ?.split(';')[0]
-            ?.trim()
-            .toLowerCase() !== 'text/event-stream'
-        ) {
+        const contentType = response.headers
+          .get('content-type')
+          ?.split(';', 1)[0]
+          ?.trim()
+          .toLowerCase();
+        if (response.body === null || contentType !== 'text/event-stream') {
           void response.body?.cancel().catch(ignoreCancellationFailure);
-          throw openAiInvalidResponse(
-            response.body === null ? 'response_body' : 'response_content_type',
-          );
+          throw new OpenAiResponsesError('invalid_response', {
+            validationFailure:
+              response.body === null
+                ? 'response_body'
+                : 'response_content_type',
+            httpStatus: response.status,
+            contentTypeCategory: classifyContentType(contentType),
+          });
         }
         return readEvents(
           response.body,
@@ -208,6 +211,23 @@ export function createOpenAiResponsesFetchClient(
       },
     }),
   });
+}
+
+function classifyContentType(
+  contentType: string | undefined,
+): NonNullable<OpenAiResponsesDiagnostics['contentTypeCategory']> {
+  if (!contentType) return 'missing';
+  if (contentType === 'text/event-stream') return 'event_stream';
+  if (contentType.length > 256) return 'other';
+  if (contentType === 'text/html' || contentType === 'application/xhtml+xml')
+    return 'html';
+  if (
+    contentType === 'application/json' ||
+    /^application\/[a-z0-9!#$%&'*+.^_`|~-]+\+json$/.test(contentType)
+  )
+    return 'json';
+  if (/^text\/[a-z0-9!#$%&'*+.^_`|~-]+$/.test(contentType)) return 'text';
+  return 'other';
 }
 
 function bound(value: number | undefined, fallback: number): number {
