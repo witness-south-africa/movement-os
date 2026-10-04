@@ -103,6 +103,10 @@ export type OpenAiResponsesValidationFailure = z.infer<
 export const OpenAiResponsesDiagnosticsSchema = z
   .object({
     httpStatus: z.number().int().min(100).max(599).optional(),
+    /** Header classification only; never the raw MIME value or body format. */
+    contentTypeCategory: z
+      .enum(['missing', 'event_stream', 'json', 'html', 'text', 'other'])
+      .optional(),
     bodyShape: z.enum(['error', 'detail', 'other', 'unreadable']).optional(),
     providerCode: OpenAiSubscriptionErrorCodeSchema.optional(),
     validationFailure: OpenAiResponsesValidationFailureSchema.optional(),

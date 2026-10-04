@@ -129,6 +129,9 @@ function failureDiagnostics(
     ...(diagnostics.httpStatus === undefined
       ? {}
       : { httpStatus: diagnostics.httpStatus }),
+    ...(diagnostics.contentTypeCategory === undefined
+      ? {}
+      : { contentTypeCategory: diagnostics.contentTypeCategory }),
     ...(diagnostics.bodyShape === undefined
       ? {}
       : { bodyShape: diagnostics.bodyShape }),
