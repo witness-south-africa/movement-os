@@ -51,6 +51,20 @@ function terminal(response = nativeResponse()): Record<string, unknown> {
   return { type: 'response.completed', response, sequence_number: 4 };
 }
 
+function textResponse(text: string): Record<string, unknown> {
+  return nativeResponse({
+    output: [
+      {
+        id: 'msg_test',
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text, annotations: [] }],
+      },
+    ],
+  });
+}
+
 function fakeClient(
   events: readonly unknown[],
   accessMode: OpenAiAccessMode = 'api',
@@ -97,6 +111,146 @@ describe('createOpenAiResponsesProvider', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.useRealTimers();
+  });
+
+  it.each([
+    [[], 'completion_missing'],
+    [[undefined], 'event_serialization'],
+    [[null], 'event_shape'],
+    [[{ type: 'PRIVATE-UNKNOWN-EVENT' }], 'event_type'],
+    [[terminal(), terminal()], 'event_sequence'],
+    [
+      [
+        {
+          type: 'response.incomplete',
+          response: { private: 'PRIVATE-CONTENT' },
+        },
+      ],
+      'response_incomplete',
+    ],
+    [
+      [
+        {
+          type: 'response.refusal.PRIVATE-REFUSAL',
+          refusal: 'PRIVATE-CONTENT',
+        },
+      ],
+      'response_refusal',
+    ],
+    [[{ type: 'response.created', response: {} }], 'response_identity'],
+    [
+      [
+        { type: 'response.created', response: { id: 'resp_other' } },
+        terminal(),
+      ],
+      'response_identity',
+    ],
+    [
+      [{ type: 'response.output_item.added', item: { type: 'PRIVATE-TOOL' } }],
+      'output_item',
+    ],
+    [
+      [{ type: 'response.content_part.added', part: { type: 'PRIVATE-PART' } }],
+      'content_part',
+    ],
+    [[{ type: 'response.output_text.delta', delta: {} }], 'text_delta'],
+    [
+      [terminal(nativeResponse({ object: 'PRIVATE-OBJECT' }))],
+      'completion_shape',
+    ],
+    [[terminal(nativeResponse({ usage: undefined }))], 'completion_usage'],
+    [[terminal(nativeResponse({ output: [] }))], 'completion_output'],
+    [
+      [
+        terminal(
+          nativeResponse({ output: [{ type: 'message', content: [] }] }),
+        ),
+      ],
+      'completion_message',
+    ],
+    [
+      [
+        terminal(
+          nativeResponse({
+            output: [
+              { id: 'rs_test', type: 'reasoning', summary: [], status: null },
+            ],
+          }),
+        ),
+      ],
+      'completion_reasoning',
+    ],
+    [
+      [
+        terminal(
+          nativeResponse({
+            usage: { input_tokens: 2, output_tokens: 3, total_tokens: 6 },
+          }),
+        ),
+      ],
+      'usage_totals',
+    ],
+    [
+      [
+        terminal(
+          nativeResponse({
+            usage: {
+              input_tokens: 2,
+              output_tokens: 3,
+              total_tokens: 5,
+              input_tokens_details: { cached_tokens: 3 },
+            },
+          }),
+        ),
+      ],
+      'usage_details',
+    ],
+    [[terminal(textResponse('PRIVATE-INVALID-JSON'))], 'output_json'],
+    [[terminal(textResponse('{"ok":"PRIVATE-WRONG-TYPE"}'))], 'output_schema'],
+    [
+      [
+        terminal(
+          textResponse('{"ok":true,"PRIVATE-EXTRA-KEY":"PRIVATE-CONTENT"}'),
+        ),
+      ],
+      'output_extra_fields',
+    ],
+  ])(
+    'reports a finite rejection boundary (%s)',
+    async (events, validationFailure) => {
+      const { provider, closed } = providerFor(events as readonly unknown[]);
+      let failure: unknown;
+      try {
+        await provider.complete(args);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toMatchObject({
+        code: 'invalid_response',
+        diagnostics: { validationFailure },
+      });
+      expect(JSON.stringify(failure)).not.toMatch(/PRIVATE-|path|issues/);
+      await Promise.resolve();
+      expect(closed).toHaveBeenCalled();
+    },
+  );
+
+  it('diagnoses a non-streaming injected response without accepting it', async () => {
+    const client: OpenAiResponsesClient = {
+      accessMode: 'api',
+      responses: {
+        create: () =>
+          Promise.resolve(null as unknown as AsyncIterable<unknown>),
+      },
+    };
+    const provider = createOpenAiResponsesProvider({
+      client,
+      model: 'gpt-explicit',
+    });
+    await expect(provider.complete(args)).rejects.toMatchObject({
+      code: 'invalid_response',
+      diagnostics: { validationFailure: 'stream_interface' },
+    });
   });
 
   it.each(['api', 'subscription'] as const)(

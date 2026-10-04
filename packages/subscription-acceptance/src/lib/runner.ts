@@ -4,6 +4,7 @@ import {
   createOpenAiResponsesProvider,
   OpenAiResponsesError,
   sanitizeOpenAiResponsesError,
+  type OpenAiResponsesDiagnostics,
 } from '@wsa/agent-openai';
 import {
   createOpenAiSubscriptionSession,
@@ -30,6 +31,7 @@ export interface AcceptanceConfig {
   readonly hosting: 'local';
   readonly acceptUncappedOutput: true;
   readonly model?: string;
+  readonly browser?: 'system' | 'manual';
 }
 
 type Stage = 'signIn' | 'models' | 'inference' | 'signOut';
@@ -65,7 +67,11 @@ export interface AcceptanceReport {
     promotionBlocked: number;
     promotionRules: string[];
   };
-  failure?: { stage: Stage; code: string };
+  failure?: {
+    stage: Stage;
+    code: string;
+    diagnostics?: Omit<OpenAiResponsesDiagnostics, 'requestId'>;
+  };
   cleanupFailure?: string;
 }
 
@@ -111,6 +117,29 @@ function failureCode(error: unknown): string {
     /* Never inspect an arbitrary exception's message or cause. */
   }
   return 'transport_failed';
+}
+
+/** Receipt fields are finite; even a valid native request ID is not exported. */
+function failureDiagnostics(
+  error: unknown,
+): Omit<OpenAiResponsesDiagnostics, 'requestId'> | undefined {
+  const diagnostics = sanitizeOpenAiResponsesError(error).diagnostics;
+  if (!diagnostics) return undefined;
+  const finite = {
+    ...(diagnostics.httpStatus === undefined
+      ? {}
+      : { httpStatus: diagnostics.httpStatus }),
+    ...(diagnostics.bodyShape === undefined
+      ? {}
+      : { bodyShape: diagnostics.bodyShape }),
+    ...(diagnostics.providerCode === undefined
+      ? {}
+      : { providerCode: diagnostics.providerCode }),
+    ...(diagnostics.validationFailure === undefined
+      ? {}
+      : { validationFailure: diagnostics.validationFailure }),
+  };
+  return Object.keys(finite).length === 0 ? undefined : finite;
 }
 
 /** Pin inside the existing exclusive transaction; retain rotation and restore operator selection. */
@@ -293,7 +322,9 @@ export async function runAcceptance(
       !/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,511}$/.test(result.responseId) ||
       !/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(result.model)
     )
-      throw new OpenAiResponsesError('invalid_response');
+      throw new OpenAiResponsesError('invalid_response', {
+        validationFailure: 'response_identity',
+      });
     report.response = {
       id: result.responseId,
       model: result.model,
@@ -322,7 +353,12 @@ export async function runAcceptance(
     report.stages.inference = 'completed';
   } catch (error) {
     report.stages[stage] = 'failed';
-    report.failure = { stage, code: failureCode(error) };
+    const diagnostics = failureDiagnostics(error);
+    report.failure = {
+      stage,
+      code: failureCode(error),
+      ...(diagnostics === undefined ? {} : { diagnostics }),
+    };
   } finally {
     if (key) {
       report.stages.signOut = 'started';

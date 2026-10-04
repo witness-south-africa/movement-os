@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   OpenAiResponsesError,
+  openAiInvalidResponse,
   openAiResponsesFailure,
   OpenAiSubscriptionErrorCodeSchema,
   type OpenAiResponsesDiagnostics,
@@ -194,7 +195,9 @@ export function createOpenAiResponsesFetchClient(
             .toLowerCase() !== 'text/event-stream'
         ) {
           void response.body?.cancel().catch(ignoreCancellationFailure);
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse(
+            response.body === null ? 'response_body' : 'response_content_type',
+          );
         }
         return readEvents(
           response.body,
@@ -355,6 +358,15 @@ async function* parseEvents(
     signal.throwIfAborted();
     const decoder = new TextDecoder('utf-8', { fatal: true });
     const encoder = new TextEncoder();
+    const decode = (bytes?: Uint8Array): string => {
+      try {
+        return decoder.decode(bytes, { stream: bytes !== undefined });
+      } catch {
+        throw new OpenAiResponsesError('transport_failed', {
+          validationFailure: 'stream_utf8',
+        });
+      }
+    };
     let pending = '';
     let data: string[] = [];
     let eventBytes = 0;
@@ -364,13 +376,13 @@ async function* parseEvents(
       const chunk = await reader.read();
       signal.throwIfAborted();
       if (chunk.done) {
-        pending += decoder.decode();
+        pending += decode();
       } else {
         totalBytes += chunk.value.byteLength;
         if (totalBytes > maxStreamBytes) {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('stream_size');
         }
-        pending += decoder.decode(chunk.value, { stream: true });
+        pending += decode(chunk.value);
       }
       for (;;) {
         const separator = pending.search(/[\r\n]/);
@@ -391,13 +403,13 @@ async function* parseEvents(
         pending = pending.slice(separator + width);
         eventBytes += encoder.encode(line).byteLength + width;
         if (eventBytes > maxEventBytes) {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('event_size');
         }
         if (line === '') {
           if (data.length > 0) {
             const eventData = data.join('\n');
             if (doneMarker) {
-              throw new OpenAiResponsesError('invalid_response');
+              throw openAiInvalidResponse('stream_after_done');
             }
             if (eventData === '[DONE]') {
               doneMarker = true;
@@ -406,7 +418,7 @@ async function* parseEvents(
               try {
                 event = JSON.parse(eventData) as unknown;
               } catch {
-                throw new OpenAiResponsesError('invalid_response');
+                throw openAiInvalidResponse('event_json');
               }
               yield event;
             }
@@ -419,11 +431,11 @@ async function* parseEvents(
         }
       }
       if (eventBytes + encoder.encode(pending).byteLength > maxEventBytes) {
-        throw new OpenAiResponsesError('invalid_response');
+        throw openAiInvalidResponse('event_size');
       }
       if (chunk.done) {
         if (pending !== '' || data.length !== 0) {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('stream_framing');
         }
         return;
       }

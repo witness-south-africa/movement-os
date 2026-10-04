@@ -111,12 +111,33 @@ if (process.argv[2] === '--version') {
                  ['--directory', str(self.store), '--hosting', 'local',
                   '--accept-uncapped-output', '--model', 'provider text'],
                  ['--directory', str(self.store), '--hosting', 'local',
-                  '--accept-uncapped-output', '--accept-uncapped-output']]
+                  '--accept-uncapped-output', '--accept-uncapped-output'],
+                 ['--directory', str(self.store), '--hosting', 'local',
+                  '--accept-uncapped-output', '--browser', 'chrome'],
+                 ['--directory', str(self.store), '--hosting', 'local',
+                  '--accept-uncapped-output', '--browser'],
+                 ['--directory', str(self.store), '--hosting', 'local',
+                  '--accept-uncapped-output', '--browser', 'manual', '--browser', 'system']]
         for args in cases:
             with self.subTest(args=args):
                 self.rejected(self.invoke(args), 'invalid_arguments', 2)
         self.assertFalse(self.store.exists())
         self.assertFalse((self.project / 'dist').exists())
+
+    def test_browser_choice_reaches_source_bound_cli(self):
+        self.runner('return {analysisAccepted:true, localCredentialsCleared:true, '
+                    'remoteRevocationConfirmed:true, browser:options.browser ?? "system"};')
+        self.commit()
+        for choice in [None, 'system', 'manual']:
+            with self.subTest(browser=choice):
+                args = ['--directory', str(self.store), '--hosting', 'local',
+                        '--accept-uncapped-output']
+                if choice is not None:
+                    args.extend(['--browser', choice])
+                result = self.invoke(args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['browser'], choice or 'system')
+                self.assertFalse(self.store.exists())
 
     def test_closed_output_pipe_reports_only_finite_error(self):
         process = subprocess.Popen(

@@ -132,6 +132,28 @@ describe('authenticated Responses fetch transport', () => {
     expect(sanitizeOpenAiResponsesError(error).diagnostics).toBeUndefined();
   });
 
+  it('accepts only locally enumerated validation failures, never provider strings or extra fields', () => {
+    const error = new OpenAiResponsesError('invalid_response', {
+      validationFailure: 'event_type',
+    });
+    expect(sanitizeOpenAiResponsesError(error).diagnostics).toEqual({
+      validationFailure: 'event_type',
+    });
+    for (const diagnostics of [
+      { validationFailure: 'PRIVATE-PROVIDER-EVENT' },
+      { validationFailure: 'event_type', event: 'PRIVATE-PROVIDER-EVENT' },
+    ]) {
+      Object.defineProperty(error, 'diagnostics', {
+        value: diagnostics,
+        configurable: true,
+      });
+      expect(sanitizeOpenAiResponsesError(error).diagnostics).toBeUndefined();
+      expect(JSON.stringify(sanitizeOpenAiResponsesError(error))).not.toContain(
+        'PRIVATE-',
+      );
+    }
+  });
+
   it.each([
     [
       { detail: 'private-unit-policy' },
@@ -587,7 +609,17 @@ describe('authenticated Responses fetch transport', () => {
           }),
         ),
       ),
-    ).rejects.toMatchObject({ code: 'invalid_response' });
+    ).rejects.toMatchObject({
+      code: 'invalid_response',
+      diagnostics: { validationFailure: 'response_content_type' },
+    });
+  });
+
+  it('distinguishes an absent body from an unexpected content type', async () => {
+    await expect(collect(apiConfig(new Response(null)))).rejects.toMatchObject({
+      code: 'invalid_response',
+      diagnostics: { validationFailure: 'response_body' },
+    });
   });
 
   it('parses split UTF-8, comments, CRLF and multiline data', async () => {
@@ -607,21 +639,28 @@ describe('authenticated Responses fetch transport', () => {
   });
 
   it.each([
-    'data: not-json\n\n',
-    'data: {"unfinished":true}',
-    'data: {}\n',
-    'data: [DONE]\n\ndata: {}\n\n',
-    'data: [DONE]\n\ndata: [DONE]\n\n',
-  ])('rejects malformed or unfinished framing', async (body) => {
-    await expect(collect(apiConfig(sse([body])))).rejects.toMatchObject({
-      code: 'invalid_response',
-    });
-  });
+    ['data: not-json\n\n', 'event_json'],
+    ['data: {"unfinished":true}', 'stream_framing'],
+    ['data: {}\n', 'stream_framing'],
+    ['data: [DONE]\n\ndata: {}\n\n', 'stream_after_done'],
+    ['data: [DONE]\n\ndata: [DONE]\n\n', 'stream_after_done'],
+  ])(
+    'rejects malformed or unfinished framing (%s)',
+    async (body, validationFailure) => {
+      await expect(collect(apiConfig(sse([body])))).rejects.toMatchObject({
+        code: 'invalid_response',
+        diagnostics: { validationFailure },
+      });
+    },
+  );
 
   it('rejects invalid UTF-8', async () => {
     await expect(
       collect(apiConfig(sse([new Uint8Array([0xc3, 0x28])]))),
-    ).rejects.toMatchObject({ code: 'transport_failed' });
+    ).rejects.toMatchObject({
+      code: 'transport_failed',
+      diagnostics: { validationFailure: 'stream_utf8' },
+    });
   });
 
   it.each(['event', 'stream'] as const)('bounds the %s bytes', async (kind) => {
@@ -634,6 +673,9 @@ describe('authenticated Responses fetch transport', () => {
     };
     await expect(collect(config)).rejects.toMatchObject({
       code: 'invalid_response',
+      diagnostics: {
+        validationFailure: kind === 'event' ? 'event_size' : 'stream_size',
+      },
     });
   });
 

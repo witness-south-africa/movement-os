@@ -2,6 +2,7 @@ import { runCli } from './cli.js';
 import { runAcceptance } from './index.js';
 import {
   createOperatorBrowserOpener,
+  createOperatorManualBrowserOpener,
   createOperatorPrompt,
   createOpenAiSubscriptionFileStore,
 } from '@wsa/agent-openai/subscription-auth';
@@ -12,6 +13,11 @@ jest.mock('@wsa/agent-openai/subscription-auth', () => ({
   createOpenAiSubscriptionFileStore: jest.fn(() => ({})),
   createOperatorBrowserOpener: jest.fn(() =>
     jest.fn(() => Promise.resolve(undefined)),
+  ),
+  createOperatorManualBrowserOpener: jest.fn(
+    ({ display }) =>
+      (url: string) =>
+        display(url),
   ),
   createOperatorPrompt: jest.fn(() => ({
     readLine: jest.fn(() => Promise.resolve('1')),
@@ -38,9 +44,22 @@ const models = [
 const acceptance = jest.mocked(runAcceptance);
 let write: jest.SpyInstance;
 const initialTty = process.stdin.isTTY;
+type WriteCallback = (error?: Error | null) => void;
+function mockOutput(error?: Error) {
+  return (
+    _text: unknown,
+    encodingOrCallback?: BufferEncoding | WriteCallback,
+    callback?: WriteCallback,
+  ) => {
+    const complete =
+      typeof encodingOrCallback === 'function' ? encodingOrCallback : callback;
+    complete?.(error);
+    return error === undefined;
+  };
+}
 beforeEach(() => {
   jest.clearAllMocks();
-  write = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
+  write = jest.spyOn(process.stderr, 'write').mockImplementation(mockOutput());
   Object.defineProperty(process.stdin, 'isTTY', {
     configurable: true,
     value: true,
@@ -86,6 +105,79 @@ describe('operator acceptance entry point', () => {
     expect(process.listenerCount('SIGINT')).toBe(signals);
     expect(write.mock.calls.flat().join('')).not.toMatch(
       /PRIVATE-|explicit-fresh-directory|authorize\?/,
+    );
+  });
+  it('uses the system default when explicitly selected and never displays its authorization URL', async () => {
+    inRunner(async (deps) => {
+      await deps.openAuthorizationUrl(
+        'https://auth.openai.com/api/accounts/authorize?PRIVATE-HINT',
+      );
+    });
+    await runCli({ ...config, browser: 'system' }, provenance);
+    expect(createOperatorBrowserOpener).toHaveBeenCalledTimes(1);
+    expect(createOperatorManualBrowserOpener).not.toHaveBeenCalled();
+    expect(write.mock.calls.flat().join('')).not.toContain('PRIVATE-HINT');
+  });
+  it('displays only the explicit manual link to operator stderr and reuses its owned prompt', async () => {
+    const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      inRunner(async (deps) => {
+        await deps.openAuthorizationUrl(
+          'https://auth.openai.com/api/accounts/authorize?public-fresh-request',
+        );
+        expect(await deps.chooseModel(models)).toBe('visible-model');
+      });
+      await runCli({ ...config, browser: 'manual' }, provenance);
+      expect(createOperatorManualBrowserOpener).toHaveBeenCalledTimes(1);
+      expect(createOperatorBrowserOpener).not.toHaveBeenCalled();
+      expect(createOperatorPrompt).toHaveBeenCalledTimes(1);
+      expect(write.mock.calls.flat().join('')).toContain(
+        'authorize?public-fresh-request',
+      );
+      expect(write.mock.calls.flat().join('')).not.toContain(
+        'PRIVATE-ACCOUNT-LABEL',
+      );
+      expect(stdout).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+  it('rejects invalid browser selection before constructing storage or installing handlers', async () => {
+    const signals = process.listenerCount('SIGINT');
+    await expect(
+      runCli({ ...config, browser: 'chrome' as 'system' }, provenance),
+    ).rejects.toThrow('Invalid browser selection.');
+    expect(createOpenAiSubscriptionFileStore).not.toHaveBeenCalled();
+    expect(acceptance).not.toHaveBeenCalled();
+    expect(process.listenerCount('SIGINT')).toBe(signals);
+  });
+  it('cancels manual callback wait on EOF or output failure', async () => {
+    inRunner(async (deps) => {
+      await deps.openAuthorizationUrl(
+        'https://auth.openai.com/api/accounts/authorize?public-fresh-request',
+      );
+      jest.mocked(createOperatorPrompt).mock.calls[0]?.[2]?.('eof');
+      expect(deps.signal.aborted).toBe(true);
+    });
+    await runCli({ ...config, browser: 'manual' }, provenance);
+    expect(
+      jest.mocked(createOperatorPrompt).mock.results[0]?.value.close,
+    ).toHaveBeenCalled();
+  });
+  it('fails a manual link output callback without exposing the writer error', async () => {
+    write.mockImplementation(mockOutput(new Error('PRIVATE-OUTPUT-ERROR')));
+    inRunner(async (deps) => {
+      await expect(
+        deps.openAuthorizationUrl(
+          'https://auth.openai.com/api/accounts/authorize?public-fresh-request',
+        ),
+      ).rejects.toThrow('Operator output failed.');
+      expect(deps.signal.aborted).toBe(true);
+      expect(process.exitCode).toBe(1);
+    });
+    await runCli({ ...config, browser: 'manual' }, provenance);
+    expect(write.mock.calls.flat().join('')).not.toContain(
+      'PRIVATE-OUTPUT-ERROR',
     );
   });
   it.each(['', '0', '10000', 'private-text', null, '999'])(
