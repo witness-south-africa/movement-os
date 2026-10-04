@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -202,6 +203,20 @@ if (process.argv[2] === '--version') {
         installed.unlink()
         installed.symlink_to(replacement)
         self.rejected(self.invoke(), 'dependency_not_installed')
+        self.assertFalse((self.repo / 'node_modules/tsc-marker').exists())
+        self.assertFalse(self.store.exists())
+
+    def test_installed_lock_fifo_rejects_without_waiting_for_writer(self):
+        installed = self.repo / 'node_modules/.pnpm/lock.yaml'
+        installed.unlink()
+        os.mkfifo(installed, 0o600)
+        result = subprocess.run(
+            ['node', str(self.repo / 'scripts/subscription-acceptance.mjs'),
+             '--directory', str(self.store), '--hosting', 'local',
+             '--accept-uncapped-output'],
+            cwd=self.base, text=True, capture_output=True, check=False, timeout=3,
+        )
+        self.rejected(result, 'dependency_not_installed')
         self.assertFalse((self.repo / 'node_modules/tsc-marker').exists())
         self.assertFalse(self.store.exists())
 

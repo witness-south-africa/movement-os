@@ -95,7 +95,10 @@ async function command(file, args, cwd, failure, timeout = 15000) {
 }
 
 async function boundedRead(file, limit = MAX_FILE_BYTES) {
-  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await open(
+    file,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile() || metadata.size > limit) {
