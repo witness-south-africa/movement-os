@@ -38,6 +38,9 @@
     },
     {
       "path": "./packages/agent-anthropic"
+    },
+    {
+      "path": "./packages/subscription-acceptance"
     }
   ]
 }

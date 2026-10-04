@@ -259,6 +259,21 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
 
+  packages/subscription-acceptance:
+    dependencies:
+      '@wsa/agent-openai':
+        specifier: workspace:*
+        version: link:../agent-openai
+      '@wsa/evidence-engine':
+        specifier: workspace:*
+        version: link:../evidence-engine
+      '@wsa/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      tslib:
+        specifier: ^2.3.0
+        version: 2.8.1
+
 packages:
 
   '@babel/code-frame@7.29.0':
