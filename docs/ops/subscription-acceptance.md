@@ -64,16 +64,19 @@ second-provider challenge nor independent primary evidence.
 `--help` and malformed arguments return before source checks, compilation,
 browser authorization or storage effects. For a valid command, the bootstrap
 derives the repository from its own script, requires clean Git state, records
-the full revision and tree, and requires the installed pnpm lockfile to match the
-tracked lockfile. It checks the installed TypeScript against the locked `5.6.3`
+the full revision and tree, and compares actual tracked file bytes against that
+revision's Git blobs. This comparison detects changes hidden by `assume-unchanged`
+or `skip-worktree` without changing those index flags. The installed pnpm lockfile
+must match the tracked lockfile. It checks the installed TypeScript against the locked `5.6.3`
 version and runs the local compiler with project build `--force` before importing
 the compiled CLI.
 
 The bootstrap rejects symlink or ignored source substitutions, production
 workspace links to another checkout, and stale emitted files without a tracked
-source counterpart. It fingerprints the production workspace manifests, emitted
+source counterpart. File checks and reads use one open handle with final-component
+symlinks disabled, so a path replacement cannot redirect the checked read. It fingerprints the production workspace manifests, emitted
 files and vendor lockfile, and records Node and TypeScript versions. After the
-runner finishes, it rechecks Git state and the artifact fingerprint before
+runner finishes, it rechecks tracked bytes, Git state and the artifact fingerprint before
 printing a report. A concurrent source or output change invalidates that
 version-bound result.
 

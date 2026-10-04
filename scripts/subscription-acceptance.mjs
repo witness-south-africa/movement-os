@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -93,17 +95,18 @@ async function command(file, args, cwd, failure, timeout = 15000) {
 }
 
 async function boundedRead(file, limit = MAX_FILE_BYTES) {
-  const metadata = await lstat(file);
-  if (
-    !metadata.isFile() ||
-    metadata.isSymbolicLink() ||
-    metadata.size > limit
-  ) {
-    fail('invalid_source_or_artifact');
+  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > limit) {
+      fail('invalid_source_or_artifact');
+    }
+    const data = await handle.readFile();
+    if (data.byteLength > limit) fail('invalid_source_or_artifact');
+    return data;
+  } finally {
+    await handle.close();
   }
-  const data = await readFile(file);
-  if (data.byteLength > limit) fail('invalid_source_or_artifact');
-  return data;
 }
 
 async function jsonFile(file) {
@@ -143,7 +146,7 @@ async function cleanIdentity(root) {
   const tree = (
     await command(
       'git',
-      ['rev-parse', '--verify', 'HEAD^{tree}'],
+      ['rev-parse', '--verify', `${revision}^{tree}`],
       root,
       'source_unavailable',
     )
@@ -156,15 +159,42 @@ async function cleanIdentity(root) {
       .split('\0')
       .filter(Boolean),
   );
-  for (const name of tracked) {
-    const metadata = await lstat(path.join(root, name));
+  const entries = (
+    await command(
+      'git',
+      ['ls-tree', '-r', '-z', '--full-tree', revision],
+      root,
+      'source_unavailable',
+    )
+  )
+    .split('\0')
+    .filter(Boolean);
+  if (entries.length !== tracked.size || entries.length > MAX_GRAPH_FILES)
+    fail('source_bytes_changed');
+  let bytes = 0;
+  for (const entry of entries) {
+    const match = /^(100644|100755) blob ([a-f0-9]{40})\t(.+)$/.exec(entry);
+    if (!match) fail('invalid_source_or_artifact');
+    const [, , blob, name] = match;
     if (
       !safeText(name, 4096) ||
-      !metadata.isFile() ||
-      metadata.isSymbolicLink()
+      path.isAbsolute(name) ||
+      name.includes('\\') ||
+      path.posix.normalize(name) !== name ||
+      name.split('/').includes('..') ||
+      !tracked.has(name)
     ) {
       fail('invalid_source_or_artifact');
     }
+    const contents = await boundedRead(path.join(root, name));
+    bytes += contents.byteLength;
+    if (bytes > MAX_GRAPH_BYTES) fail('invalid_source_or_artifact');
+    // Hash raw bytes against the frozen HEAD object, independently of index flags.
+    const actual = createHash('sha1')
+      .update(Buffer.from(`blob ${contents.byteLength}\0`))
+      .update(contents)
+      .digest('hex');
+    if (actual !== blob) fail('source_bytes_changed');
   }
   return { revision, tree, tracked };
 }

@@ -157,6 +157,116 @@ if (process.argv[2] === '--version') {
         self.rejected(self.invoke(), 'source_not_clean')
         self.assertFalse((self.repo / 'node_modules/tsc-marker').exists())
 
+    def test_hidden_index_changes_reject_before_build_and_preserve_flags(self):
+        source = 'packages/subscription-acceptance/src/cli.ts'
+        original = (self.repo / source).read_text()
+        for flag in ['--assume-unchanged', '--skip-worktree']:
+            with self.subTest(flag=flag):
+                self.git('update-index', flag, source)
+                index_before = self.git('ls-files', '-v', source)
+                (self.repo / source).write_text('uncommitted source sentinel')
+                self.assertEqual(self.git('status', '--porcelain'), '')
+                self.rejected(self.invoke(), 'source_bytes_changed')
+                self.assertEqual(self.git('ls-files', '-v', source), index_before)
+                self.assertFalse((self.repo / 'node_modules/tsc-marker').exists())
+                self.assertFalse(self.store.exists())
+                (self.repo / source).write_text(original)
+                self.git('update-index', flag.replace('--', '--no-', 1), source)
+
+    def test_hidden_runtime_source_changes_suppress_receipt_and_preserve_flags(self):
+        source = 'packages/subscription-acceptance/src/cli.ts'
+        for flag in ['--assume-unchanged', '--skip-worktree']:
+            with self.subTest(flag=flag):
+                self.runner('const fs = await import("node:fs/promises"); '
+                            f'/* {flag} */ '
+                            'await fs.writeFile(new URL("../src/cli.ts", import.meta.url), '
+                            '"hidden runtime mutation"); '
+                            'return {analysisAccepted:true, localCredentialsCleared:true, '
+                            'remoteRevocationConfirmed:true};')
+                self.commit()
+                original = (self.repo / source).read_text()
+                self.git('update-index', flag, source)
+                index_before = self.git('ls-files', '-v', source)
+                self.rejected(self.invoke(), 'source_bytes_changed')
+                self.assertTrue((self.repo / 'node_modules/tsc-marker').exists())
+                self.assertEqual(self.git('status', '--porcelain'), '')
+                self.assertEqual(self.git('ls-files', '-v', source), index_before)
+                self.assertFalse(self.store.exists())
+                (self.repo / source).write_text(original)
+                self.git('update-index', flag.replace('--', '--no-', 1), source)
+
+    def test_installed_lock_symlink_rejects_before_build(self):
+        installed = self.repo / 'node_modules/.pnpm/lock.yaml'
+        replacement = self.base / 'outside-lock.yaml'
+        shutil.copyfile(installed, replacement)
+        installed.unlink()
+        installed.symlink_to(replacement)
+        self.rejected(self.invoke(), 'dependency_not_installed')
+        self.assertFalse((self.repo / 'node_modules/tsc-marker').exists())
+        self.assertFalse(self.store.exists())
+
+    def test_path_replacement_reads_original_handle_and_suppresses_receipt(self):
+        source = self.project / 'src/cli.ts'
+        original = source.read_text()
+        backup = self.base / 'original-source.ts'
+        replacement = self.base / 'outside-source.ts'
+        replacement.write_text('replacement credential sentinel')
+        observation = self.base / 'handle-observation.json'
+        probe = f"""
+import fs from 'node:fs';
+import {{ syncBuiltinESMExports }} from 'node:module';
+import {{ pathToFileURL }} from 'node:url';
+const target = {json.dumps(str(source))};
+const observationFile = {json.dumps(str(observation))};
+const originalText = {json.dumps(original)};
+const originalOpen = fs.promises.open;
+let observed;
+fs.promises.open = async (...args) => {{
+  const handle = await originalOpen(...args);
+  if (args[0] !== target || observed) return handle;
+  observed = {{ noFollow: Boolean(args[1] & fs.constants.O_NOFOLLOW), stableRead:false, closed:false }};
+  const stat = handle.stat.bind(handle);
+  const read = handle.readFile.bind(handle);
+  const close = handle.close.bind(handle);
+  handle.stat = async () => {{
+    const metadata = await stat();
+    await fs.promises.rename(target, {json.dumps(str(backup))});
+    await fs.promises.symlink({json.dumps(str(replacement))}, target);
+    return metadata;
+  }};
+  handle.readFile = async (...readArgs) => {{
+    const contents = await read(...readArgs);
+    observed.stableRead = contents.toString('utf8') === originalText;
+    return contents;
+  }};
+  handle.close = async () => {{
+    await close();
+    observed.closed = true;
+    await fs.promises.writeFile(observationFile, JSON.stringify(observed));
+  }};
+  return handle;
+}};
+syncBuiltinESMExports();
+const module = await import(pathToFileURL({json.dumps(str(self.repo / 'scripts/subscription-acceptance.mjs'))}).href);
+try {{
+  await module.runBootstrap(['--directory', {json.dumps(str(self.store))}, '--hosting', 'local', '--accept-uncapped-output']);
+  process.stdout.write('unexpected receipt');
+}} catch {{
+  process.stderr.write('finite race rejection\\n');
+  process.exitCode = 1;
+}}
+"""
+        result = subprocess.run(['node', '--input-type=module', '-e', probe],
+                                cwd=self.base, text=True, capture_output=True,
+                                check=False, timeout=20)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, 'finite race rejection\n')
+        self.assertEqual(json.loads(observation.read_text()),
+                         {'noFollow': True, 'stableRead': True, 'closed': True})
+        self.assertFalse((self.repo / 'node_modules/tsc-marker').exists())
+        self.assertFalse(self.store.exists())
+
     def test_ignored_source_config_and_source_symlink_reject_before_build(self):
         with (self.repo / '.gitignore').open('a') as stream:
             stream.write('**/untracked.ts\n/ignored-config.json\n')
