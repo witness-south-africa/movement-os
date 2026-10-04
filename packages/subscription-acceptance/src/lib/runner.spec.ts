@@ -1,3 +1,4 @@
+import { OpenAiResponsesError } from '@wsa/agent-openai';
 import {
   createOpenAiSubscriptionSession,
   OpenAiSubscriptionAuthError,
@@ -440,7 +441,7 @@ describe('fresh account subscription acceptance', () => {
       const h = harness();
       h.setEvent(event);
       const result = await runAcceptance(config, provenance, h.deps);
-      expect(result.failure).toEqual({ stage: 'inference', code });
+      expect(result.failure).toMatchObject({ stage: 'inference', code });
       expect(result.responsesDispatches).toBe(1);
       expect(result.analysisAccepted).toBe(false);
       expect(result.response).toBeUndefined();
@@ -468,6 +469,97 @@ describe('fresh account subscription acceptance', () => {
       expect(result.analysisAccepted).toBe(false);
     },
   );
+  it.each([
+    [
+      new Response('PRIVATE-BODY', {
+        headers: { 'content-type': 'text/plain' },
+      }),
+      'response_content_type',
+    ],
+    [new Response(null), 'response_body'],
+    [
+      stream({ type: 'PRIVATE-NEW-EVENT', private: 'PRIVATE-CONTENT' }),
+      'event_type',
+    ],
+    [stream(completed({ usage: undefined })), 'completion_usage'],
+    [stream(completed({ output: [] })), 'completion_output'],
+    [
+      new Response('data: PRIVATE-INVALID-JSON\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+      'event_json',
+    ],
+  ])(
+    'carries only the finite native rejection into the receipt (%s)',
+    async (response, validationFailure) => {
+      const h = harness();
+      h.setStream(response as Response);
+      const result = await runAcceptance(config, provenance, h.deps);
+      expect(result.failure).toEqual({
+        stage: 'inference',
+        code: 'invalid_response',
+        diagnostics: { validationFailure },
+      });
+      expect(result.responsesDispatches).toBe(1);
+      expect(result.analysisAccepted).toBe(false);
+      expect(result.response).toBeUndefined();
+      expect(result.localCredentialsCleared).toBe(true);
+      expect(result.remoteRevocationConfirmed).toBe(true);
+      expect(JSON.stringify(result)).not.toMatch(
+        /PRIVATE-|path|issues|requestId/,
+      );
+    },
+  );
+  it('keeps finite HTTP diagnostics but omits even syntactically valid request identities', async () => {
+    const h = harness();
+    h.setStream(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'subscription_sharing_user_not_eligible',
+            message: 'PRIVATE-PROVIDER',
+          },
+        }),
+        {
+          status: 403,
+          headers: { 'x-request-id': 'PRIVATE-REQUEST-IDENTITY' },
+        },
+      ),
+    );
+    const result = await runAcceptance(config, provenance, h.deps);
+    expect(result.failure).toEqual({
+      stage: 'inference',
+      code: 'subscription_ineligible',
+      diagnostics: {
+        httpStatus: 403,
+        bodyShape: 'error',
+        providerCode: 'subscription_sharing_user_not_eligible',
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/PRIVATE-|requestId|message/);
+    expect(result.responsesDispatches).toBe(1);
+    expect(result.localCredentialsCleared).toBe(true);
+  });
+  it('drops injected malformed diagnostics instead of serializing provider data', async () => {
+    const h = harness();
+    const error = new OpenAiResponsesError('invalid_response');
+    Object.defineProperty(error, 'diagnostics', {
+      value: {
+        validationFailure: 'PRIVATE-VALIDATION',
+        requestId: 'PRIVATE-REQUEST',
+        private: 'PRIVATE-BODY',
+      },
+    });
+    h.signInFailure(error);
+    const result = await runAcceptance(config, provenance, h.deps);
+    expect(result.failure).toEqual({
+      stage: 'signIn',
+      code: 'invalid_response',
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /PRIVATE-|diagnostics|cause|stack/,
+    );
+  });
   it('cleans up a freshly created registration when plan authorization was declined', async () => {
     const h = harness();
     h.denyPlan();

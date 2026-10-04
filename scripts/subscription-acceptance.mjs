@@ -14,9 +14,11 @@ const TYPESCRIPT = '5.6.3';
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_GRAPH_BYTES = 64 * 1024 * 1024;
 const MAX_GRAPH_FILES = 5000;
-const HELP = `Usage: pnpm openai:acceptance --directory /absolute/private-parent/new-store --hosting local --accept-uncapped-output [--model visible-slug]
+const HELP = `Usage: pnpm openai:acceptance --directory /absolute/private-parent/new-store --hosting local --accept-uncapped-output [--model visible-slug] [--browser system|manual]
 
-Use a fresh local store and choose the ChatGPT account in the system browser.
+Use a fresh local store and choose the ChatGPT account in your system default
+browser. --browser manual displays a fresh public sign-in link instead of opening
+a browser. It never displays saved-account login or token hints.
 The runner selects a visible model, makes one synthetic analysis, and signs out
 its own registration. Refresh is not_observed unless a real refresh is attempted.
 Run from a clean checkout after pnpm install --frozen-lockfile. The bootstrap
@@ -50,7 +52,9 @@ export function parseArguments(args) {
     seen.add(flag);
     if (flag === '--accept-uncapped-output') {
       options.acceptUncappedOutput = true;
-    } else if (['--directory', '--hosting', '--model'].includes(flag)) {
+    } else if (
+      ['--directory', '--hosting', '--model', '--browser'].includes(flag)
+    ) {
       const value = args[++index];
       if (!safeText(value, flag === '--directory' ? 4096 : 256)) {
         fail('invalid_arguments');
@@ -72,6 +76,12 @@ export function parseArguments(args) {
   if (
     options.model !== undefined &&
     !/^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(options.model)
+  ) {
+    fail('invalid_arguments');
+  }
+  if (
+    options.browser !== undefined &&
+    !['system', 'manual'].includes(options.browser)
   ) {
     fail('invalid_arguments');
   }

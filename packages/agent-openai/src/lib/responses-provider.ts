@@ -9,11 +9,13 @@ import {
 import { z } from 'zod';
 import {
   OpenAiResponsesError,
+  openAiInvalidResponse,
   openAiResponsesFailure,
   sanitizeOpenAiResponsesError,
   type OpenAiAccessMode,
   type OpenAiResponsesClient,
   type OpenAiResponsesRequest,
+  type OpenAiResponsesValidationFailure,
 } from './responses-client.js';
 import { zodToOpenAiResponsesJsonSchema } from './responses-json-schema.js';
 
@@ -168,7 +170,7 @@ export function createOpenAiResponsesProvider(
           });
           if (!isAsyncIterable(stream)) {
             checkDeadline();
-            throw new OpenAiResponsesError('invalid_response');
+            throw openAiInvalidResponse('stream_interface');
           }
           iterator = stream[Symbol.asyncIterator]();
           checkDeadline();
@@ -180,14 +182,14 @@ export function createOpenAiResponsesProvider(
             json = JSON.parse(response.text);
           } catch {
             checkDeadline();
-            throw new OpenAiResponsesError('invalid_response');
+            throw openAiInvalidResponse('output_json');
           }
           checkDeadline();
           const validated = args.schema.safeParse(json);
           checkDeadline();
-          if (!validated.success || !sameJsonValue(json, validated.data)) {
-            throw new OpenAiResponsesError('invalid_response');
-          }
+          if (!validated.success) throw openAiInvalidResponse('output_schema');
+          if (!sameJsonValue(json, validated.data))
+            throw openAiInvalidResponse('output_extra_fields');
           checkDeadline();
           return {
             value: validated.data as z.infer<TSchema>,
@@ -312,7 +314,7 @@ async function consume(
     checkDeadline();
     if (step.done === true) {
       if (completed === undefined) {
-        throw new OpenAiResponsesError('invalid_response');
+        throw openAiInvalidResponse('completion_missing');
       }
       return completed;
     }
@@ -322,23 +324,20 @@ async function consume(
     try {
       const serialised: unknown = JSON.stringify(event);
       if (typeof serialised !== 'string') {
-        throw new OpenAiResponsesError('invalid_response');
+        throw openAiInvalidResponse('event_serialization');
       }
       bytes = Buffer.byteLength(serialised, 'utf8');
     } catch {
-      throw new OpenAiResponsesError('invalid_response');
+      throw openAiInvalidResponse('event_serialization');
     }
     checkDeadline();
     streamBytes += bytes;
-    if (
-      eventCount > MAX_EVENTS ||
-      bytes > MAX_EVENT_BYTES ||
-      streamBytes > MAX_STREAM_BYTES ||
-      !isRecord(event) ||
-      typeof event.type !== 'string'
-    ) {
-      throw new OpenAiResponsesError('invalid_response');
-    }
+    if (eventCount > MAX_EVENTS) throw openAiInvalidResponse('event_count');
+    if (bytes > MAX_EVENT_BYTES) throw openAiInvalidResponse('event_size');
+    if (streamBytes > MAX_STREAM_BYTES)
+      throw openAiInvalidResponse('stream_size');
+    if (!isRecord(event) || typeof event.type !== 'string')
+      throw openAiInvalidResponse('event_shape');
     if (event.type === 'response.failed') {
       const error = isRecord(event.response) ? event.response.error : undefined;
       throw openAiResponsesFailure(isRecord(error) ? error.code : undefined);
@@ -346,22 +345,20 @@ async function consume(
     if (event.type === 'error') {
       throw openAiResponsesFailure(event.code);
     }
-    if (
-      completed !== undefined ||
-      event.type === 'response.incomplete' ||
-      event.type.startsWith('response.refusal.')
-    ) {
-      throw new OpenAiResponsesError('invalid_response');
-    }
+    if (completed !== undefined) throw openAiInvalidResponse('event_sequence');
+    if (event.type === 'response.incomplete')
+      throw openAiInvalidResponse('response_incomplete');
+    if (event.type.startsWith('response.refusal.'))
+      throw openAiInvalidResponse('response_refusal');
     if (event.type === 'response.completed') {
       completed = certify(event.response);
       checkDeadline();
       if (responseId !== undefined && completed.id !== responseId) {
-        throw new OpenAiResponsesError('invalid_response');
+        throw openAiInvalidResponse('response_identity');
       }
     } else {
       if (!INTERMEDIATE_TYPES.has(event.type)) {
-        throw new OpenAiResponsesError('invalid_response');
+        throw openAiInvalidResponse('event_type');
       }
       if (
         event.type === 'response.created' ||
@@ -374,7 +371,7 @@ async function consume(
           !snapshot.success ||
           (responseId !== undefined && responseId !== snapshot.data.id)
         ) {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('response_identity');
         }
         responseId = snapshot.data.id;
       }
@@ -383,7 +380,7 @@ async function consume(
           !isRecord(event.item) ||
           (event.item.type !== 'message' && event.item.type !== 'reasoning')
         ) {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('output_item');
         }
         if (
           event.item.status === 'incomplete' ||
@@ -393,16 +390,16 @@ async function consume(
               (part: unknown) => !isRecord(part) || part.type !== 'output_text',
             ))
         ) {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('output_item');
         }
       }
       if (event.type.startsWith('response.content_part.')) {
         if (!isRecord(event.part) || event.part.type !== 'output_text') {
-          throw new OpenAiResponsesError('invalid_response');
+          throw openAiInvalidResponse('content_part');
         }
       }
       if (event.type.endsWith('.delta') && typeof event.delta !== 'string') {
-        throw new OpenAiResponsesError('invalid_response');
+        throw openAiInvalidResponse('text_delta');
       }
     }
   }
@@ -411,7 +408,23 @@ async function consume(
 function certify(raw: unknown): CertifiedResponse {
   const parsed = CompletedSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new OpenAiResponsesError('invalid_response');
+    // Choose from local names only. Never retain Zod paths, issues or output.
+    let failure: OpenAiResponsesValidationFailure = 'completion_shape';
+    const issue = parsed.error.issues[0];
+    if (issue?.path[0] === 'usage') failure = 'completion_usage';
+    else if (issue?.path[0] === 'output') {
+      failure = 'completion_output';
+      const index = issue.path[1];
+      const item =
+        isRecord(raw) && Array.isArray(raw.output) && typeof index === 'number'
+          ? (raw.output[index] as unknown)
+          : undefined;
+      if (isRecord(item) && item.type === 'message')
+        failure = 'completion_message';
+      else if (isRecord(item) && item.type === 'reasoning')
+        failure = 'completion_reasoning';
+    }
+    throw openAiInvalidResponse(failure);
   }
   const response = parsed.data;
   const messages = response.output.filter((item) => item.type === 'message');
@@ -419,20 +432,24 @@ function certify(raw: unknown): CertifiedResponse {
   const text = message?.content[0]?.text;
   const nativeUsage = response.usage;
   const cached = nativeUsage.input_tokens_details?.cached_tokens;
+  if (messages.length !== 1 || text === undefined)
+    throw openAiInvalidResponse('completion_message');
   if (
-    messages.length !== 1 ||
-    text === undefined ||
     !Number.isSafeInteger(
       nativeUsage.input_tokens + nativeUsage.output_tokens,
     ) ||
     nativeUsage.total_tokens !==
-      nativeUsage.input_tokens + nativeUsage.output_tokens ||
+      nativeUsage.input_tokens + nativeUsage.output_tokens
+  ) {
+    throw openAiInvalidResponse('usage_totals');
+  }
+  if (
     (cached !== undefined && cached > nativeUsage.input_tokens) ||
     (nativeUsage.output_tokens_details !== undefined &&
       nativeUsage.output_tokens_details.reasoning_tokens >
         nativeUsage.output_tokens)
   ) {
-    throw new OpenAiResponsesError('invalid_response');
+    throw openAiInvalidResponse('usage_details');
   }
   return {
     id: response.id,

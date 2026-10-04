@@ -3,7 +3,7 @@
 The private Node package `@wsa/subscription-acceptance` connects the reviewed
 OpenAI account session, Responses adapter and evidence engine for one local
 acceptance run. It uses a fresh dedicated store and a synthetic fixture. The
-operator chooses the ChatGPT account in the system browser and a model from that
+operator chooses the ChatGPT account in their preferred browser and a model from that
 account's visible catalog. The runner makes at most one Responses request and
 then signs out its own registration. It does not retry, dispatch a challenger or
 fall back to API billing.
@@ -38,12 +38,28 @@ The command requires `--hosting local` and an explicit
 cap. The engine policy permits this one analysis lane; account authorization and
 plan limits still apply. See the official [models and inference guide](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
 
-Complete **Continue with ChatGPT** in the same-host system browser, choosing the
-intended account and authorizing plan usage. The fixed system launcher and
-`127.0.0.1` callback must be reachable on that host. WSL or VM browser compatibility
-is an observation to establish during the run, rather than an assumption from
-source tests. The runner does not print an authorization URL or accept pasted
-credentials.
+The default `--browser system` uses the operating system's registered default
+browser through `/usr/bin/xdg-open` on Linux or `/usr/bin/open` on macOS. It does
+not select Chrome or change browser settings. In WSL, this is the Linux default;
+it does not automatically choose a Windows browser.
+
+If automatic opening is unsuitable, add `--browser manual`. The terminal displays
+one validated fresh public PKCE sign-in link on stderr. Open it in your preferred
+browser on this computer, including your Windows default browser when running the
+command in WSL. Keep the terminal open while completing **Continue with ChatGPT**,
+choosing the intended account and authorizing plan usage. The native `127.0.0.1`
+callback must be reachable from that browser before the five-minute session
+expires. WSL or VM reachability requires actual observation during the run.
+Cancellation, terminal EOF and output failure stop the attempt; do not paste
+callback codes or credentials into the terminal.
+
+Manual display is restricted to a fresh registration: it rejects unknown or
+duplicate query keys, token/login hints and altered authorization or callback
+endpoints. The account-management CLI continues opening the system default
+browser without printing links, because a saved-account authorization request
+can contain private identity hints. Authorization links are excluded from the
+acceptance JSON; retain operator stderr privately rather than attaching it to
+issues or PRs.
 
 The terminal lists the visible model slugs and asks for a numbered choice.
 Alternatively, pass `--model exact-visible-slug`; the runner still fetches this
@@ -96,6 +112,13 @@ and observed response models, native response identity and usage, bounded
 guardrail codes, and sign-out results. It excludes account labels, emails, private
 store paths, authorization URLs, credentials, provider text and response bodies.
 Retain the report with the exact command, date and observed browser behavior.
+
+For response failures, `failure.diagnostics.validationFailure` identifies a finite
+local rejection category, such as framing, event, completion, usage or schema
+validation. Finite `httpStatus`, `bodyShape` and validated `providerCode` may also
+be present. These categories identify the rejected boundary without accepting an
+invalid response or proving the provider's underlying cause. Request IDs, raw
+events, schema paths, provider text and response bodies remain excluded.
 
 Exit `0` requires an accepted analysis, confirmed local credential clearing and
 confirmed remote revocation. A finite bootstrap failure exits `1`; invalid usage

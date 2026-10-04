@@ -63,11 +63,49 @@ export const OpenAiSubscriptionErrorCodeSchema = z.enum([
   'subscription_sharing_usage_unavailable',
   'subscription_sharing_user_not_eligible',
 ]);
+/** Local rejection points, never values or paths copied from provider output. */
+export const OpenAiResponsesValidationFailureSchema = z.enum([
+  'response_body',
+  'response_content_type',
+  'stream_interface',
+  'stream_size',
+  'event_size',
+  'event_json',
+  'stream_framing',
+  'stream_after_done',
+  'stream_utf8',
+  'event_serialization',
+  'event_count',
+  'event_shape',
+  'event_type',
+  'event_sequence',
+  'response_incomplete',
+  'response_refusal',
+  'response_identity',
+  'output_item',
+  'content_part',
+  'text_delta',
+  'completion_missing',
+  'completion_shape',
+  'completion_usage',
+  'completion_output',
+  'completion_message',
+  'completion_reasoning',
+  'usage_totals',
+  'usage_details',
+  'output_json',
+  'output_schema',
+  'output_extra_fields',
+]);
+export type OpenAiResponsesValidationFailure = z.infer<
+  typeof OpenAiResponsesValidationFailureSchema
+>;
 export const OpenAiResponsesDiagnosticsSchema = z
   .object({
     httpStatus: z.number().int().min(100).max(599).optional(),
     bodyShape: z.enum(['error', 'detail', 'other', 'unreadable']).optional(),
     providerCode: OpenAiSubscriptionErrorCodeSchema.optional(),
+    validationFailure: OpenAiResponsesValidationFailureSchema.optional(),
     requestId: z
       .string()
       .regex(/^[A-Za-z0-9_-]{1,128}$/)
@@ -87,6 +125,12 @@ export class OpenAiResponsesError extends Error {
     super(`openai responses adapter: ${code}`);
     this.name = 'OpenAiResponsesError';
   }
+}
+
+export function openAiInvalidResponse(
+  validationFailure: OpenAiResponsesValidationFailure,
+): OpenAiResponsesError {
+  return new OpenAiResponsesError('invalid_response', { validationFailure });
 }
 
 /** Recognize only documented subscription errors; never inspect message text. */

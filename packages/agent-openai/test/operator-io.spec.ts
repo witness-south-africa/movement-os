@@ -1,7 +1,14 @@
 import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { createOperatorBrowserOpener } from '../src/lib/operator-browser.js';
+import {
+  createOperatorBrowserOpener,
+  createOperatorManualBrowserOpener,
+} from '../src/lib/operator-browser.js';
 import { createOperatorPrompt } from '../src/lib/operator-terminal.js';
+import {
+  harness,
+  initializeSubscriptionFixtures,
+} from './subscription-fixtures.js';
 
 const AUTH_URL =
   'https://auth.openai.com/api/accounts/authorize?state=literal%24%28private%29&id_token_hint=private-hint';
@@ -120,6 +127,211 @@ describe('system browser boundary', () => {
     );
     expect(f.kill).toHaveBeenCalledWith('SIGKILL');
     expect(f.unref).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('explicit fresh authorization link boundary', () => {
+  beforeAll(initializeSubscriptionFixtures);
+  function freshUrl() {
+    const url = new URL('https://auth.openai.com/api/accounts/authorize');
+    url.search = new URLSearchParams({
+      client_id: 'dynamic_agent_client',
+      agent_name_hint: 'Movement OS',
+      ext_agent_host_id: 'urn:uuid:12345678-1234-4234-8234-123456789abc',
+      response_type: 'code',
+      redirect_uri: 'http://127.0.0.1:43623/auth/callback',
+      scope:
+        'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct',
+      resource: 'https://api.openai.com/v1',
+      state: 's'.repeat(43),
+      nonce: 'n'.repeat(43),
+      code_challenge_method: 'S256',
+      code_challenge: 'c'.repeat(43),
+      prompt: 'consent',
+    }).toString();
+    return url;
+  }
+  function manualFixture(timeoutMs = 1000) {
+    const controller = new AbortController();
+    const display = jest.fn(() => Promise.resolve());
+    const open = createOperatorManualBrowserOpener({
+      signal: controller.signal,
+      display,
+      timeoutMs,
+    });
+    return { controller, display, open };
+  }
+  it('displays only a validated fresh public PKCE request', async () => {
+    const f = manualFixture();
+    const url = freshUrl().href;
+    await expect(f.open(url)).resolves.toBeUndefined();
+    expect(f.display).toHaveBeenCalledTimes(1);
+    expect(f.display).toHaveBeenCalledWith(url);
+  });
+  it('accepts the native fresh-session URL through its actual loopback callback', async () => {
+    const f = harness();
+    // The native protected file store generates this version-4 urn form.
+    f.store.state.hostId = 'urn:uuid:12345678-1234-4234-8234-123456789abc';
+    const display = jest.fn(f.open);
+    const account = await f.session.signIn({
+      enablePlanUsage: true,
+      openAuthorizationUrl: createOperatorManualBrowserOpener({
+        signal: new AbortController().signal,
+        display,
+      }),
+    });
+    expect(account.signedIn).toBe(true);
+    expect(account.planUsageAuthorized).toBe(true);
+    expect(display).toHaveBeenCalledTimes(1);
+    expect(f.authorization.searchParams.has('id_token_hint')).toBe(false);
+    expect(f.authorization.searchParams.has('login_hint')).toBe(false);
+    expect(f.requests.some(({ url }) => url.endsWith('/oauth/token'))).toBe(
+      true,
+    );
+    expect(f.requests.every(({ url }) => !url.endsWith('/responses'))).toBe(
+      true,
+    );
+  });
+  it('rejects native saved-account hints without display and preserves credentials', async () => {
+    const f = harness();
+    f.store.state.hostId = 'urn:uuid:12345678-1234-4234-8234-123456789abc';
+    const account = await f.session.signIn({
+      enablePlanUsage: true,
+      openAuthorizationUrl: f.open,
+    });
+    const before = structuredClone(f.store.state);
+    const display = jest.fn(f.open);
+    await expect(
+      f.session.signIn({
+        accountKey: account.key,
+        enablePlanUsage: true,
+        openAuthorizationUrl: createOperatorManualBrowserOpener({
+          signal: new AbortController().signal,
+          display,
+        }),
+      }),
+    ).rejects.toMatchObject({ code: 'transport_failed' });
+    expect(display).not.toHaveBeenCalled();
+    expect(f.store.state).toEqual(before);
+  });
+  it.each([
+    ['id_token_hint', 'PRIVATE-TOKEN'],
+    ['login_hint', 'PRIVATE-EMAIL'],
+    ['access_token', 'PRIVATE-TOKEN'],
+    ['code', 'PRIVATE-CALLBACK-CODE'],
+    ['unknown', 'PRIVATE-VALUE'],
+    ['client_id', 'issued-saved-client'],
+    ['agent_name_hint', 'PRIVATE-ACCOUNT-LABEL'],
+    ['response_type', 'token'],
+    ['code_challenge_method', 'plain'],
+    ['code_challenge', 'unbounded-or-invalid'],
+    ['state', 'state\nprivate'],
+    ['nonce', 'nonce-private'],
+    ['prompt', 'none'],
+    ['resource', 'https://other.test/v1'],
+    ['scope', 'openid private_scope'],
+    ['ext_agent_host_id', 'PRIVATE-HOST-ID'],
+    ['redirect_uri', 'https://127.0.0.1:43623/auth/callback'],
+    ['redirect_uri', 'http://localhost:43623/auth/callback'],
+    ['redirect_uri', 'http://other.test:43623/auth/callback'],
+    ['redirect_uri', 'http://127.0.0.1:43623/other'],
+    ['redirect_uri', 'http://127.0.0.1:43623/auth/callback?code=PRIVATE'],
+    ['redirect_uri', 'http://private@127.0.0.1:43623/auth/callback'],
+    ['redirect_uri', 'http://127.0.0.1:43623/auth/callback#PRIVATE'],
+    ['redirect_uri', 'http://127.0.0.1/auth/callback'],
+  ])('rejects unsafe %s without displaying any URL', async (key, value) => {
+    const f = manualFixture();
+    const url = freshUrl();
+    url.searchParams.set(key, value);
+    await expect(f.open(url.href)).rejects.toThrow(
+      'Manual authorization link could not be displayed.',
+    );
+    expect(f.display).not.toHaveBeenCalled();
+  });
+  it.each(['state', 'client_id', 'redirect_uri'])(
+    'rejects duplicate %s',
+    async (key) => {
+      const f = manualFixture();
+      const url = freshUrl();
+      url.searchParams.append(key, url.searchParams.get(key) ?? '');
+      await expect(f.open(url.href)).rejects.toThrow(
+        'Manual authorization link could not be displayed.',
+      );
+      expect(f.display).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['state', 'code_challenge', 'ext_agent_host_id', 'prompt'])(
+    'rejects missing %s',
+    async (key) => {
+      const f = manualFixture();
+      const url = freshUrl();
+      url.searchParams.delete(key);
+      await expect(f.open(url.href)).rejects.toThrow(
+        'Manual authorization link could not be displayed.',
+      );
+      expect(f.display).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects credentials, fragments, controls and non-official endpoints', async () => {
+    const base = freshUrl().href;
+    for (const url of [
+      'invalid-private-url',
+      base.replace('https:', 'http:'),
+      base.replace('auth.openai.com', 'other.test'),
+      base.replace('/api/accounts/authorize', '/other'),
+      base.replace('https://', 'https://user:PRIVATE@'),
+      `${base}#PRIVATE`,
+      `${base}\n`,
+      base.replace('state=', 'state=%E2%80%AE'),
+      base + 'x'.repeat(8192),
+    ]) {
+      const f = manualFixture();
+      await expect(f.open(url)).rejects.toThrow(
+        'Manual authorization link could not be displayed.',
+      );
+      expect(f.display).not.toHaveBeenCalled();
+    }
+  });
+  it('does not display after cancellation', async () => {
+    const f = manualFixture();
+    f.controller.abort();
+    await expect(f.open(freshUrl().href)).rejects.toThrow(
+      'Manual authorization link could not be displayed.',
+    );
+    expect(f.display).not.toHaveBeenCalled();
+  });
+  it.each(['throw', 'reject'] as const)(
+    'suppresses %s output diagnostics',
+    async (mode) => {
+      const f = manualFixture();
+      f.display.mockImplementation(() => {
+        if (mode === 'throw') throw new Error('PRIVATE-WRITER-DIAGNOSTIC');
+        return Promise.reject(new Error('PRIVATE-WRITER-DIAGNOSTIC'));
+      });
+      await expect(f.open(freshUrl().href)).rejects.toThrow(
+        'Manual authorization link could not be displayed.',
+      );
+    },
+  );
+  it('bounds a stalled output sink and absorbs late failure after cancellation', async () => {
+    for (const mode of ['timeout', 'cancel']) {
+      const f = manualFixture(5);
+      let reject!: (error: Error) => void;
+      f.display.mockImplementation(
+        () =>
+          new Promise<void>((_, fail) => {
+            reject = fail;
+          }),
+      );
+      const pending = f.open(freshUrl().href);
+      await Promise.resolve();
+      if (mode === 'cancel') f.controller.abort();
+      await expect(pending).rejects.toThrow(
+        'Manual authorization link could not be displayed.',
+      );
+      reject(new Error('PRIVATE-LATE-WRITER-DIAGNOSTIC'));
+      await Promise.resolve();
+    }
   });
 });
 
