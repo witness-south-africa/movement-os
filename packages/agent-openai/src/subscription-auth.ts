@@ -15,3 +15,5 @@ export type {
   SubscriptionAccountInfo,
   SubscriptionModelInfo,
 } from './lib/subscription-session.js';
+export { createOperatorBrowserOpener } from './lib/operator-browser.js';
+export { createOperatorPrompt } from './lib/operator-terminal.js';
